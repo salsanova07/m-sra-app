@@ -1,7 +1,7 @@
 {
   "name": "Mısra — Yazar Asistanı",
   "short_name": "Mısra",
-  "description": "Claude'a bağlı yazar asistanı.",
+  "description": "Yazma sürecinde yanında bir asistan.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

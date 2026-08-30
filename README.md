@@ -57,7 +57,7 @@ Tarayıcıda: http://localhost:8000
 | `app/config.py` | `.env` / ortam değişkeni ayarları |
 | `static/index.html` `style.css` `app.js` | Chat arayüzü + konuşma paneli + geri bildirim formu |
 | `static/manifest.webmanifest` `service-worker.js` | PWA |
-| `static/icons/` | Uygulama ikonları |
+| `static/icons/` | Uygulama ikonları + `og-image.png` (link önizlemesi) |
 
 ## API
 
@@ -110,6 +110,19 @@ açılışta en son güncellenen konuşmayı yükler; panelden eski konuşmalara
 - Telefonda "Ana ekrana ekle" için sitenin **HTTPS** üzerinden servis edilmesi gerekir
   (localhost geliştirmede istisna). Dağıtımda bir reverse proxy (Caddy/Nginx) ile TLS ekle.
 - İkonlar basit yer tutucudur; kendi görselinle değiştir.
+
+## Link önizlemesi (Open Graph)
+
+`GET /` sayfası `%OG_BASE%` yer tutucusunu isteğin mutlak adresiyle değiştirir, böylece
+`og:image` / `og:url` WhatsApp, Telegram vb. için tam URL olur. Önizleme görseli:
+`static/icons/og-image.png` (1200×630, cennet ağacı logosu).
+
+Ters vekil arkasında `og:url`'nin `https://` ve doğru host ile üretilmesi için uvicorn'u
+`--proxy-headers` ile çalıştır:
+
+```bash
+uvicorn app.main:app --proxy-headers --forwarded-allow-ips='*'
+```
 
 ## Sonraki adımlar (iskelette yok)
 

@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import AsyncIterator, Literal
 
 import anthropic
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
@@ -52,9 +52,14 @@ def _conv_dict(c: Conversation) -> dict:
 # --------------------------------------------------------------------------- #
 # Statik / PWA
 # --------------------------------------------------------------------------- #
-@app.get("/")
-async def index() -> FileResponse:
-    return FileResponse(STATIC_DIR / "index.html")
+@app.get("/", response_class=HTMLResponse)
+async def index(request: Request) -> HTMLResponse:
+    # %OG_BASE% yer tutucusunu isteğin mutlak adresiyle değiştir — böylece
+    # og:image / og:url link önizlemelerinde (WhatsApp, Telegram) mutlak URL olur.
+    # Ters vekil arkasında doğru şema/host için uvicorn'u --proxy-headers ile çalıştır.
+    base = str(request.base_url).rstrip("/")
+    html_text = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    return HTMLResponse(html_text.replace("%OG_BASE%", base))
 
 
 @app.get("/manifest.webmanifest")
