@@ -98,6 +98,7 @@ açılışta en son güncellenen konuşmayı yükler; panelden eski konuşmalara
 | `DATABASE_URL` | — | Zorunlu. PostgreSQL bağlantısı. Yoksa uygulama açılışta hata verir. |
 | `CLAUDE_MODEL` | `claude-sonnet-5` | Kullanılacak model |
 | `MAX_TOKENS` | `4096` | Yanıt başına maksimum token |
+| `USER_NAME` | `Barış` | Asistanın zaman zaman adıyla hitap ettiği kişi (sistem promptuna geçer) |
 | `ADMIN_PASSWORD` | — | `/admin` şifresi. Boşsa `/admin` 503 döner. |
 | `RESEND_API_KEY` | — | Resend API anahtarı. Boşsa e-posta bildirimi atlanır. |
 | `NOTIFY_EMAIL` | — | Bildirim e-postalarının gideceği adres. |

@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     max_tokens: int = 4096
     database_url: str = ""
 
+    # Asistanın hitap ettiği kişinin adı (sistem promptuna geçer)
+    user_name: str = "Barış"
+
     # /admin sayfası için şifre (boşsa /admin 503 döner)
     admin_password: str = ""
 

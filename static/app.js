@@ -128,7 +128,8 @@ function autoGrow() {
 }
 input.addEventListener("input", autoGrow);
 input.addEventListener("keydown", (e) => {
-  if (e.key === "Enter" && !e.shiftKey) {
+  // Enter = yeni satır (varsayılan). Göndermek için Ctrl+Enter (veya ⌘+Enter).
+  if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
     e.preventDefault();
     form.requestSubmit();
   }

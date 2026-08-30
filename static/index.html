@@ -83,10 +83,13 @@
 
   <main id="chat" class="chat" aria-live="polite"></main>
 
-  <form id="composer" class="composer">
-    <textarea id="input" rows="1" placeholder="Bir şeyler yaz…" autocomplete="off"></textarea>
-    <button id="send" type="submit" aria-label="Gönder">↑</button>
-  </form>
+  <div class="composer">
+    <form id="composer" class="composer-row">
+      <textarea id="input" rows="1" placeholder="Bir şeyler yaz…" autocomplete="off"></textarea>
+      <button id="send" type="submit" aria-label="Gönder">↑</button>
+    </form>
+    <p class="composer-hint">Yeni satır için <kbd>Enter</kbd> · göndermek için <kbd>Ctrl</kbd>+<kbd>Enter</kbd></p>
+  </div>
   </div>
   </div>
 

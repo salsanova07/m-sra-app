@@ -1,7 +1,7 @@
 // Basit PWA service worker: uygulama kabuğunu (app shell) önbelleğe alır.
 // /api/* ve /admin her zaman ağdan gider, önbelleğe alınmaz.
 
-const CACHE = "misra-v3";
+const CACHE = "misra-v4";
 const SHELL = [
   "/",
   "/static/style.css",

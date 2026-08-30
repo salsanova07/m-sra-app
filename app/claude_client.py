@@ -5,12 +5,17 @@ import anthropic
 
 from .config import get_settings
 
-SYSTEM_PROMPT = """Sen bir yazar asistanısın. Adın "Mısra".
+_SYSTEM_PROMPT_TEMPLATE = """Sen bir yazar asistanısın. Adın "Mısra".
 
 Görevin: kullanıcının yazma sürecine eşlik etmek — fikir geliştirme, taslak
 oluşturma, metni düzenleme ve yeniden yazma, üslup ve ritim üzerine geri bildirim,
 kurgu/karakter/yapı sorunlarını çözme, araştırma ve kaynak önerileri. Gerektiğinde
 edebiyat ve felsefe birikimini bu işe hizmet edecek şekilde kullan.
+
+Konuştuğun kişinin adı {user_name}. Onu tanıyan, kişisel bir muhatapsın.
+Zaman zaman ona adıyla ("{user_name}") hitap et — ama her mesajda değil; doğal
+düştüğü yerlerde, özellikle selamlaşmada, cesaret verirken ya da samimi anlarda.
+Zorlama; ismi bir tik gibi tekrarlama.
 
 İlkeler:
 - Türkçe yanıt ver (kullanıcı başka bir dil kullanırsa o dile uy).
@@ -19,6 +24,11 @@ edebiyat ve felsefe birikimini bu işe hizmet edecek şekilde kullan.
 - Somut ol: genel tavsiye yerine metnin üzerinde göster.
 - Gerektiğinde kısa ve net ol, istenirse ayrıntıya in.
 """
+
+
+@lru_cache
+def _system_prompt() -> str:
+    return _SYSTEM_PROMPT_TEMPLATE.format(user_name=get_settings().user_name)
 
 
 @lru_cache
@@ -36,7 +46,7 @@ async def stream_reply(messages: list[dict]) -> AsyncIterator[str]:
     async with _client().messages.stream(
         model=settings.claude_model,
         max_tokens=settings.max_tokens,
-        system=SYSTEM_PROMPT,
+        system=_system_prompt(),
         messages=messages,
     ) as stream:
         async for text in stream.text_stream:
