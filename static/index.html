@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>Mısra — Edebiyat & Felsefe Asistanı</title>
-  <meta name="description" content="Claude'a bağlı edebiyat ve felsefe sohbet asistanı." />
+  <title>Mısra — Yazar Asistanı</title>
+  <meta name="description" content="Claude'a bağlı yazar asistanı." />
 
   <link rel="manifest" href="/manifest.webmanifest" />
   <meta name="theme-color" content="#1b1a17" />
@@ -17,11 +17,25 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="stylesheet"
-        href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&display=swap" />
+        href="https://fonts.googleapis.com/css2?family=Merriweather:ital,wght@0,400;0,700;1,400&display=swap" />
   <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
+  <div class="layout">
+  <aside class="sidebar" id="sidebar" aria-label="Konuşmalar">
+    <div class="sidebar-head">
+      <button id="new-conv" class="new-conv" type="button">+ Yeni Konuşma</button>
+    </div>
+    <ul id="conv-list" class="conv-list"></ul>
+    <div class="sidebar-foot">
+      <button id="feedback-btn" class="feedback-btn" type="button">Öneri / Hata Bildir</button>
+    </div>
+  </aside>
+  <div class="overlay" id="overlay" hidden></div>
+
+  <div class="chat-col">
   <header class="topbar">
+    <button class="menu-btn" id="menu-btn" type="button" aria-label="Konuşmaları aç">☰</button>
     <svg class="leaf" viewBox="0 0 120 210" role="img" aria-label="Cennet ağacı yaprağı" xmlns="http://www.w3.org/2000/svg">
       <defs>
         <path id="leaflet" d="M0,0 Q16,-8 38,-2 Q20,2 14,3 Q12,6 9,4 Q4,4 0,0 Z" />
@@ -48,22 +62,41 @@
     </svg>
     <div class="wordmark">
       <h1>Mısra</h1>
-      <span class="subtitle">edebiyat &amp; felsefe asistanı</span>
+      <span class="subtitle">yazar asistanı</span>
     </div>
   </header>
 
-  <main id="chat" class="chat" aria-live="polite">
-    <div class="msg assistant">
-      <div class="bubble">
-        Merhaba. Ben Mısra. Şiir, roman, felsefe — ne konuşmak istersin?
-      </div>
-    </div>
-  </main>
+  <main id="chat" class="chat" aria-live="polite"></main>
 
   <form id="composer" class="composer">
     <textarea id="input" rows="1" placeholder="Bir şeyler yaz…" autocomplete="off"></textarea>
     <button id="send" type="submit" aria-label="Gönder">↑</button>
   </form>
+  </div>
+  </div>
+
+  <dialog id="feedback-dialog" class="dialog">
+    <form id="feedback-form">
+      <h2>Geri Bildirim</h2>
+      <label class="field">
+        <span>Tür</span>
+        <select id="fb-kind">
+          <option value="suggestion">Öneri</option>
+          <option value="bug">Hata</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>Mesaj</span>
+        <textarea id="fb-message" rows="5" maxlength="5000" required
+                  placeholder="Ne önermek / bildirmek istersin?"></textarea>
+      </label>
+      <p id="fb-status" class="fb-status" hidden></p>
+      <div class="dialog-actions">
+        <button type="button" id="fb-cancel" class="btn-ghost">İptal</button>
+        <button type="submit" id="fb-send" class="btn-primary">Gönder</button>
+      </div>
+    </form>
+  </dialog>
 
   <script src="/static/app.js"></script>
 </body>

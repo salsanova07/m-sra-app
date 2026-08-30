@@ -1,7 +1,7 @@
 // Basit PWA service worker: uygulama kabuğunu (app shell) önbelleğe alır.
-// Sohbet istekleri (/api/*) her zaman ağdan gider, önbelleğe alınmaz.
+// /api/* ve /admin her zaman ağdan gider, önbelleğe alınmaz.
 
-const CACHE = "misra-v1";
+const CACHE = "misra-v3";
 const SHELL = [
   "/",
   "/static/style.css",
@@ -29,7 +29,7 @@ self.addEventListener("fetch", (event) => {
   if (request.method !== "GET") return;
 
   const url = new URL(request.url);
-  if (url.pathname.startsWith("/api/")) return; // sohbet: ağ
+  if (url.pathname.startsWith("/api/") || url.pathname === "/admin") return; // ağ
 
   event.respondWith(
     caches.match(request).then((cached) => {

@@ -1,7 +1,7 @@
 {
-  "name": "Mısra — Edebiyat & Felsefe Asistanı",
+  "name": "Mısra — Yazar Asistanı",
   "short_name": "Mısra",
-  "description": "Claude'a bağlı edebiyat ve felsefe sohbet asistanı.",
+  "description": "Claude'a bağlı yazar asistanı.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

@@ -15,6 +15,10 @@ __pycache__/
 venv/
 env/
 
+# Yerel geliştirme DB'si
+*.db
+*.sqlite3
+
 # Editör / OS
 .DS_Store
 .idea/
