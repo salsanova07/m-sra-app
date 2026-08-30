@@ -35,7 +35,7 @@
         href="https://fonts.googleapis.com/css2?family=Merriweather:ital,wght@0,400;0,700;1,400&display=swap" />
   <link rel="stylesheet" href="/static/style.css" />
 </head>
-<body>
+<body data-auth="%AUTH%">
   <div class="layout">
   <aside class="sidebar" id="sidebar" aria-label="Konuşmalar">
     <div class="sidebar-head">
@@ -44,6 +44,7 @@
     <ul id="conv-list" class="conv-list"></ul>
     <div class="sidebar-foot">
       <button id="feedback-btn" class="feedback-btn" type="button">Öneri / Hata Bildir</button>
+      <button id="logout-btn" class="feedback-btn" type="button">Çıkış yap</button>
     </div>
   </aside>
   <div class="overlay" id="overlay" hidden></div>

@@ -56,3 +56,21 @@ class Feedback(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+
+
+class LoginSession(Base):
+    """Uzun ömürlü (1 yıl) oturum — çerezdeki jetonla eşleşir.
+
+    `email` sütunu geçmiş sürümden kalma addır; oturum sahibinin kullanıcı
+    adını tutar.
+    """
+
+    __tablename__ = "login_sessions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    token: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    email: Mapped[str] = mapped_column(String(320))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

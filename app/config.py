@@ -31,6 +31,11 @@ class Settings(BaseSettings):
     notify_email: str = ""
     feedback_from_email: str = "onboarding@resend.dev"
 
+    # Ana sayfa kullanıcı adı + şifre girişi.
+    # İkisi de boşsa giriş zorunluluğu KAPALIDIR (herkes girer).
+    user_login: str = ""
+    user_password: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:

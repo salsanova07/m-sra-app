@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Mısra — Giriş</title>
+  <meta name="description" content="Yazma sürecinde yanında bir asistan." />
+  <link rel="icon" href="/static/icons/icon.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=Merriweather:ital,wght@0,400;0,700;1,400&display=swap" />
+  <style>
+    :root {
+      --bg: #1b1a17; --panel: #262420; --text: #ece7de;
+      --muted: #a49d8e; --accent: #c9a227;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; display: grid; place-items: center;
+      padding: 24px; background: var(--bg); color: var(--text);
+      font-family: "Merriweather", Georgia, "Times New Roman", serif;
+    }
+    .card { width: 100%; max-width: 380px; text-align: center; }
+    .leaf { width: auto; height: 64px; color: var(--accent); margin-bottom: 10px; }
+    h1 { margin: 0; font-size: 1.6rem; font-weight: 700; color: var(--accent); }
+    .sub { color: var(--muted); font-style: italic; margin: 4px 0 26px; }
+    form { display: flex; flex-direction: column; gap: 10px; }
+    input {
+      font: inherit; padding: 11px 13px; border-radius: 10px;
+      border: 1px solid #4a463c; background: var(--panel); color: var(--text);
+    }
+    input:focus { outline: 2px solid var(--accent); }
+    button {
+      font: inherit; padding: 11px; border-radius: 10px; cursor: pointer;
+      border: 1px solid var(--accent); background: var(--accent); color: #1b1a17;
+    }
+    button:disabled { opacity: 0.5; cursor: default; }
+    .msg { margin: 14px 0 0; font-size: 0.95rem; min-height: 1.2em; }
+    .msg.ok { color: #8fbf8a; }
+    .msg.err { color: #e0908a; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <svg class="leaf" viewBox="0 0 120 210" role="img" aria-label="Mısra" xmlns="http://www.w3.org/2000/svg">
+      <defs><path id="lf" d="M0,0 Q16,-8 38,-2 Q20,2 14,3 Q12,6 9,4 Q4,4 0,0 Z" /></defs>
+      <g fill="currentColor">
+        <path d="M60,206 C58,206 58,201 59,196 C60,150 61,150 60,96 C60,60 60,40 60,14"
+              fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" />
+        <use href="#lf" transform="translate(60,190) rotate(-26) scale(1.05)" />
+        <use href="#lf" transform="translate(60,190) scale(-1,1) rotate(-26) scale(1.05)" />
+        <use href="#lf" transform="translate(60,166) rotate(-27)" />
+        <use href="#lf" transform="translate(60,166) scale(-1,1) rotate(-27)" />
+        <use href="#lf" transform="translate(60,142) rotate(-28) scale(0.94)" />
+        <use href="#lf" transform="translate(60,142) scale(-1,1) rotate(-28) scale(0.94)" />
+        <use href="#lf" transform="translate(60,118) rotate(-30) scale(0.86)" />
+        <use href="#lf" transform="translate(60,118) scale(-1,1) rotate(-30) scale(0.86)" />
+        <use href="#lf" transform="translate(60,95) rotate(-32) scale(0.76)" />
+        <use href="#lf" transform="translate(60,95) scale(-1,1) rotate(-32) scale(0.76)" />
+        <use href="#lf" transform="translate(60,73) rotate(-36) scale(0.64)" />
+        <use href="#lf" transform="translate(60,73) scale(-1,1) rotate(-36) scale(0.64)" />
+        <use href="#lf" transform="translate(60,14) rotate(-90) scale(0.6)" />
+      </g>
+    </svg>
+    <h1>Mısra</h1>
+    <p class="sub">yazar asistanı</p>
+
+    <form id="login-form">
+      <input id="username" type="text" required autocomplete="username"
+             placeholder="Kullanıcı adı" />
+      <input id="password" type="password" required autocomplete="current-password"
+             placeholder="Şifre" />
+      <button id="submit" type="submit">Giriş yap</button>
+    </form>
+    <p id="msg" class="msg" aria-live="polite"></p>
+  </div>
+
+  <script>
+    const form = document.getElementById("login-form");
+    const username = document.getElementById("username");
+    const password = document.getElementById("password");
+    const submit = document.getElementById("submit");
+    const msg = document.getElementById("msg");
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const u = username.value.trim();
+      const p = password.value;
+      if (!u || !p) return;
+      submit.disabled = true;
+      msg.className = "msg";
+      msg.textContent = "Kontrol ediliyor…";
+      try {
+        const res = await fetch("/api/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username: u, password: p }),
+        });
+        if (res.ok) {
+          msg.className = "msg ok";
+          msg.textContent = "Giriş yapıldı, yönlendiriliyorsun…";
+          window.location.href = "/";
+        } else {
+          const data = await res.json().catch(() => ({}));
+          msg.className = "msg err";
+          msg.textContent = data.detail || "Kullanıcı adı veya şifre hatalı.";
+          password.value = "";
+          password.focus();
+        }
+      } catch (err) {
+        msg.className = "msg err";
+        msg.textContent = "Bağlantı hatası: " + err.message;
+      } finally {
+        submit.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

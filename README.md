@@ -52,10 +52,11 @@ Tarayıcıda: http://localhost:8000
 | `app/main.py` | FastAPI uygulaması, rotalar, SSE chat endpoint'i |
 | `app/claude_client.py` | Claude API bağlantısı, sistem promptu, streaming yanıt |
 | `app/db.py` | Async SQLAlchemy motoru, oturum, tablo oluşturma |
-| `app/models.py` | `Conversation`, `Message`, `Feedback` ORM modelleri |
+| `app/models.py` | `Conversation`, `Message`, `Feedback`, `LoginSession` |
 | `app/notify.py` | Resend API ile geri bildirim e-posta bildirimi |
+| `app/auth.py` | Kullanıcı adı + şifre girişi: oturum / bağımlılıklar |
 | `app/config.py` | `.env` / ortam değişkeni ayarları |
-| `static/index.html` `style.css` `app.js` | Chat arayüzü + konuşma paneli + geri bildirim formu |
+| `static/index.html` `login.html` `style.css` `app.js` | Chat arayüzü + giriş sayfası |
 | `static/manifest.webmanifest` `service-worker.js` | PWA |
 | `static/icons/` | Uygulama ikonları + `og-image.png` (link önizlemesi) |
 
@@ -70,6 +71,31 @@ Tarayıcıda: http://localhost:8000
 | `POST` | `/api/chat` | `{conversation_id, content}` → yanıtı SSE ile akıtır, iki tarafı da DB'ye yazar |
 | `POST` | `/api/feedback` | `{kind: "suggestion"\|"bug", message}` → DB'ye yazar, e-posta bildirir |
 | `GET` | `/admin` | Şifre korumalı (HTTP Basic) geri bildirim listesi, tarih sırası |
+| `GET` | `/login` | Kullanıcı adı + şifre giriş formu (auth kapalıysa `/`'a yönlendirir) |
+| `POST` | `/api/login` | `{username, password}` → doğruysa 1 yıllık oturum çerezi; yanlışsa 401 |
+| `POST` | `/logout` | Oturumu ve çerezi siler |
+
+## Giriş (kullanıcı adı + şifre)
+
+`USER_LOGIN` ve `USER_PASSWORD` **ikisi de boşsa giriş kapalıdır** — herkes doğrudan
+girer (varsayılan davranış).
+
+İkisi de doluysa:
+
+1. Ziyaretçi `/` adresine gidince giriş formu görür.
+2. Bilgiler yanlışsa: **"Kullanıcı adı veya şifre hatalı."** (401).
+3. Doğruysa **1 yıllık** `misra_session` çerezi kurulur — aynı cihaz/tarayıcıda bir
+   daha giriş ekranı çıkmaz. Sol paneldeki **Çıkış yap** ile sonlandırılır.
+
+Karşılaştırma sabit zamanlıdır (`secrets.compare_digest`). Oturumlar `login_sessions`
+tablosunda opak jeton olarak tutulur; **konuşma geçmişi (`conversations`/`messages`)
+bu sistemden tamamen bağımsızdır, hiçbir mesaj silinmez.**
+
+Tüm `/api/*` uçları ve `/` sayfası bu oturuma bağlıdır. **`/admin` bundan bağımsızdır**,
+kendi `ADMIN_PASSWORD` korumasını kullanır.
+
+> Üretimde çereze `Secure` bayrağı isteğin şemasına göre konur — ters vekil arkasında
+> `uvicorn ... --proxy-headers` şart.
 
 ## Geri bildirim
 
@@ -86,6 +112,10 @@ Tarayıcıda: http://localhost:8000
 - **conversations**: `id`, `title` (ilk mesajdan türetilir), `created_at`, `updated_at`
 - **messages**: `id`, `conversation_id` (FK, cascade delete), `role`, `content`, `created_at`
 - **feedback**: `id`, `kind` (`suggestion` \| `bug`), `message`, `created_at`
+- **login_sessions**: `id`, `token`, `email` (kullanıcı adını tutar), `expires_at` — 1 yıl
+
+> Eski magic-link sürümünden kalan `login_tokens` tablosu artık kullanılmıyor;
+> boş kalır, istersen elle silebilirsin (`DROP TABLE login_tokens`).
 
 Her konuşma kendi mesaj geçmişini tutar; geçmişler birbirine karışmaz. Arayüz
 açılışta en son güncellenen konuşmayı yükler; panelden eski konuşmalara dönülebilir.
@@ -100,9 +130,11 @@ açılışta en son güncellenen konuşmayı yükler; panelden eski konuşmalara
 | `MAX_TOKENS` | `4096` | Yanıt başına maksimum token |
 | `USER_NAME` | `Barış` | Asistanın zaman zaman adıyla hitap ettiği kişi (sistem promptuna geçer) |
 | `ADMIN_PASSWORD` | — | `/admin` şifresi. Boşsa `/admin` 503 döner. |
-| `RESEND_API_KEY` | — | Resend API anahtarı. Boşsa e-posta bildirimi atlanır. |
-| `NOTIFY_EMAIL` | — | Bildirim e-postalarının gideceği adres. |
-| `FEEDBACK_FROM_EMAIL` | `onboarding@resend.dev` | Gönderen adresi (doğrulanmış alan adın yoksa varsayılanı bırak). |
+| `RESEND_API_KEY` | — | Resend API anahtarı. Boşsa geri bildirim e-postası atlanır. |
+| `NOTIFY_EMAIL` | — | Geri bildirim bildirimlerinin gideceği adres. |
+| `FEEDBACK_FROM_EMAIL` | `onboarding@resend.dev` | Geri bildirim e-postasının gönderen adresi. |
+| `USER_LOGIN` | — | Giriş kullanıcı adı. `USER_PASSWORD` ile birlikte boşsa giriş kapalı. |
+| `USER_PASSWORD` | — | Giriş şifresi. |
 
 ## PWA notları
 

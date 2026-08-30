@@ -240,7 +240,12 @@ html, body {
 .sidebar-foot {
   padding: 10px;
   border-top: 1px solid #3a372f;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
+
+body:not([data-auth="1"]) #logout-btn { display: none; }
 
 .feedback-btn {
   width: 100%;

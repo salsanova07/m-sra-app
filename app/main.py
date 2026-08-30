@@ -9,13 +9,21 @@ from typing import AsyncIterator, Literal
 
 import anthropic
 from fastapi import Depends, FastAPI, HTTPException, Request, status
-from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    StreamingResponse,
+)
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from . import auth
+from .auth import require_user
 from .claude_client import stream_reply
 from .config import get_settings
 from .db import SessionMaker, engine, get_session, init_db
@@ -54,12 +62,75 @@ def _conv_dict(c: Conversation) -> dict:
 # --------------------------------------------------------------------------- #
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request) -> HTMLResponse:
+    # Giriş zorunluysa ve oturum yoksa: giriş sayfasını göster.
+    if auth.auth_enabled() and await auth.optional_user(request) is None:
+        return HTMLResponse((STATIC_DIR / "login.html").read_text(encoding="utf-8"))
+
     # %OG_BASE% yer tutucusunu isteğin mutlak adresiyle değiştir — böylece
     # og:image / og:url link önizlemelerinde (WhatsApp, Telegram) mutlak URL olur.
     # Ters vekil arkasında doğru şema/host için uvicorn'u --proxy-headers ile çalıştır.
     base = str(request.base_url).rstrip("/")
     html_text = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
-    return HTMLResponse(html_text.replace("%OG_BASE%", base))
+    html_text = html_text.replace("%OG_BASE%", base).replace(
+        "%AUTH%", "1" if auth.auth_enabled() else ""
+    )
+    return HTMLResponse(html_text)
+
+
+# --------------------------------------------------------------------------- #
+# Kullanıcı adı + şifre girişi — /admin'den bağımsız
+# --------------------------------------------------------------------------- #
+_YEAR_SECONDS = 365 * 24 * 3600
+
+
+def _set_session_cookie(response, request: Request, token: str) -> None:
+    response.set_cookie(
+        auth.COOKIE_NAME,
+        token,
+        max_age=_YEAR_SECONDS,
+        httponly=True,
+        samesite="lax",
+        secure=request.url.scheme == "https",
+        path="/",
+    )
+
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request):
+    if not auth.auth_enabled() or await auth.optional_user(request) is not None:
+        return RedirectResponse("/", status_code=303)
+    return HTMLResponse((STATIC_DIR / "login.html").read_text(encoding="utf-8"))
+
+
+class LoginRequest(BaseModel):
+    username: str = Field(min_length=1, max_length=200)
+    password: str = Field(min_length=1, max_length=500)
+
+
+@app.post("/api/login")
+async def do_login(
+    body: LoginRequest, request: Request, session: AsyncSession = Depends(get_session)
+):
+    if not auth.auth_enabled():
+        return {"ok": True}
+
+    if not auth.check_credentials(body.username, body.password):
+        raise HTTPException(
+            status_code=401, detail="Kullanıcı adı veya şifre hatalı."
+        )
+
+    token = await auth.create_session(session, body.username.strip())
+    response = JSONResponse({"ok": True})
+    _set_session_cookie(response, request, token)
+    return response
+
+
+@app.post("/logout")
+async def logout(request: Request):
+    await auth.destroy_session(request.cookies.get(auth.COOKIE_NAME))
+    response = RedirectResponse("/login", status_code=303)
+    response.delete_cookie(auth.COOKIE_NAME, path="/")
+    return response
 
 
 @app.get("/manifest.webmanifest")
@@ -84,7 +155,7 @@ async def health() -> dict:
 # --------------------------------------------------------------------------- #
 # Konuşmalar
 # --------------------------------------------------------------------------- #
-@app.get("/api/conversations")
+@app.get("/api/conversations", dependencies=[Depends(require_user)])
 async def list_conversations(session: AsyncSession = Depends(get_session)) -> list[dict]:
     rows = (
         await session.execute(
@@ -96,7 +167,7 @@ async def list_conversations(session: AsyncSession = Depends(get_session)) -> li
     return [_conv_dict(c) for c in rows]
 
 
-@app.post("/api/conversations", status_code=201)
+@app.post("/api/conversations", status_code=201, dependencies=[Depends(require_user)])
 async def create_conversation(session: AsyncSession = Depends(get_session)) -> dict:
     conv = Conversation()
     session.add(conv)
@@ -105,7 +176,7 @@ async def create_conversation(session: AsyncSession = Depends(get_session)) -> d
     return _conv_dict(conv)
 
 
-@app.get("/api/conversations/{conv_id}/messages")
+@app.get("/api/conversations/{conv_id}/messages", dependencies=[Depends(require_user)])
 async def conversation_messages(
     conv_id: int, session: AsyncSession = Depends(get_session)
 ) -> dict:
@@ -124,7 +195,9 @@ async def conversation_messages(
     }
 
 
-@app.delete("/api/conversations/{conv_id}", status_code=204)
+@app.delete(
+    "/api/conversations/{conv_id}", status_code=204, dependencies=[Depends(require_user)]
+)
 async def delete_conversation(
     conv_id: int, session: AsyncSession = Depends(get_session)
 ) -> None:
@@ -142,7 +215,7 @@ class ChatRequest(BaseModel):
     content: str = Field(min_length=1, max_length=20000)
 
 
-@app.post("/api/chat")
+@app.post("/api/chat", dependencies=[Depends(require_user)])
 async def chat(req: ChatRequest) -> StreamingResponse:
     """Yeni kullanıcı mesajını ilgili konuşmaya kaydeder, Claude'un yanıtını
     akıtır ve yanıt tamamlanınca onu da kaydeder.
@@ -215,7 +288,7 @@ class FeedbackRequest(BaseModel):
     message: str = Field(min_length=1, max_length=5000)
 
 
-@app.post("/api/feedback", status_code=201)
+@app.post("/api/feedback", status_code=201, dependencies=[Depends(require_user)])
 async def create_feedback(
     req: FeedbackRequest, session: AsyncSession = Depends(get_session)
 ) -> dict:

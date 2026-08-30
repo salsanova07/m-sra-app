@@ -13,6 +13,16 @@ const GREETING = "Merhaba. Ben Mısra. Ne üzerinde çalışıyorsun?";
 let currentId = null; // açık konuşmanın id'si
 let sending = false;
 
+// Oturum düşerse (401) giriş sayfasına dön.
+async function apiFetch(url, opts) {
+  const res = await fetch(url, opts);
+  if (res.status === 401) {
+    window.location.href = "/login";
+    throw new Error("Oturum sona erdi");
+  }
+  return res;
+}
+
 // --------------------------------------------------------------------------- //
 // Mesaj balonları
 // --------------------------------------------------------------------------- //
@@ -41,7 +51,7 @@ function renderMessages(messages) {
 // Konuşma listesi / paneli
 // --------------------------------------------------------------------------- //
 async function loadConversations() {
-  const res = await fetch("/api/conversations");
+  const res = await apiFetch("/api/conversations");
   const items = await res.json();
   convList.innerHTML = "";
   for (const c of items) {
@@ -72,7 +82,7 @@ async function loadConversations() {
 }
 
 async function openConversation(id) {
-  const res = await fetch(`/api/conversations/${id}/messages`);
+  const res = await apiFetch(`/api/conversations/${id}/messages`);
   if (!res.ok) return;
   const data = await res.json();
   currentId = data.id;
@@ -85,7 +95,7 @@ async function openConversation(id) {
 }
 
 async function newConversation() {
-  const res = await fetch("/api/conversations", { method: "POST" });
+  const res = await apiFetch("/api/conversations", { method: "POST" });
   const c = await res.json();
   currentId = c.id;
   await loadConversations();
@@ -95,7 +105,7 @@ async function newConversation() {
 }
 
 async function deleteConversation(id) {
-  await fetch(`/api/conversations/${id}`, { method: "DELETE" });
+  await apiFetch(`/api/conversations/${id}`, { method: "DELETE" });
   if (id === currentId) currentId = null;
   const items = await loadConversations();
   if (currentId === null) {
@@ -157,7 +167,7 @@ form.addEventListener("submit", async (e) => {
   let acc = "";
 
   try {
-    const res = await fetch("/api/chat", {
+    const res = await apiFetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ conversation_id: currentId, content: text }),
@@ -224,6 +234,20 @@ feedbackBtn.addEventListener("click", () => {
 
 fbCancel.addEventListener("click", () => fbDialog.close());
 
+// --------------------------------------------------------------------------- //
+// Çıkış
+// --------------------------------------------------------------------------- //
+const logoutBtn = document.getElementById("logout-btn");
+logoutBtn?.addEventListener("click", async () => {
+  logoutBtn.disabled = true;
+  try {
+    await fetch("/logout", { method: "POST" });
+  } catch (_) {
+    /* yoksay */
+  }
+  window.location.href = "/login";
+});
+
 fbForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   const message = fbMessage.value.trim();
@@ -232,7 +256,7 @@ fbForm.addEventListener("submit", async (e) => {
   fbSend.disabled = true;
   fbStatus.hidden = true;
   try {
-    const res = await fetch("/api/feedback", {
+    const res = await apiFetch("/api/feedback", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ kind: fbKind.value, message }),
