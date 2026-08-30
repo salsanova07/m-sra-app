@@ -1,0 +1,128 @@
+:root {
+  --bg: #1b1a17;
+  --panel: #262420;
+  --text: #ece7de;
+  --muted: #a49d8e;
+  --accent: #c9a227;
+  --user: #33507a;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "EB Garamond", "Cormorant Garamond", Georgia,
+               "Palatino Linotype", "Times New Roman", serif;
+  font-size: 18px;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  max-width: 780px;
+  margin: 0 auto;
+  padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+}
+
+.topbar {
+  padding: 14px 18px 10px;
+  border-bottom: 1px solid #3a372f;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.leaf {
+  width: auto;
+  height: 46px;
+  flex: none;
+  color: var(--accent);
+  transform: rotate(-8deg);
+}
+
+.wordmark { display: flex; flex-direction: column; line-height: 1.15; }
+
+.topbar h1 {
+  margin: 0;
+  font-size: 1.7rem;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  color: var(--accent);
+}
+
+.subtitle { color: var(--muted); font-size: 0.95rem; font-style: italic; }
+
+.chat {
+  flex: 1;
+  overflow-y: auto;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.msg { display: flex; }
+.msg.user { justify-content: flex-end; }
+
+.bubble {
+  max-width: 82%;
+  padding: 10px 14px;
+  border-radius: 14px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  background: var(--panel);
+}
+
+.msg.user .bubble { background: var(--user); }
+.msg.assistant .bubble { border: 1px solid #3a372f; }
+
+.bubble.pending::after {
+  content: "▍";
+  animation: blink 1s steps(1) infinite;
+  color: var(--muted);
+}
+
+@keyframes blink { 50% { opacity: 0; } }
+
+.composer {
+  display: flex;
+  gap: 8px;
+  padding: 12px 14px calc(12px + env(safe-area-inset-bottom));
+  border-top: 1px solid #3a372f;
+  background: var(--bg);
+}
+
+#input {
+  flex: 1;
+  resize: none;
+  max-height: 140px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid #4a463c;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-size: 1rem;
+}
+
+#input:focus { outline: 2px solid var(--accent); outline-offset: 0; }
+
+#send {
+  width: 44px;
+  border: none;
+  border-radius: 12px;
+  background: var(--accent);
+  color: #1b1a17;
+  font-size: 1.2rem;
+  cursor: pointer;
+}
+
+#send:disabled { opacity: 0.5; cursor: default; }
+
+.error { color: #e0908a; font-style: italic; }

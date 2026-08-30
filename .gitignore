@@ -1,0 +1,21 @@
+# Ortam / sırlar
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+
+# Sanal ortam
+.venv/
+venv/
+env/
+
+# Editör / OS
+.DS_Store
+.idea/
+.vscode/

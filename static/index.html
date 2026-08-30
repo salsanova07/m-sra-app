@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Mısra — Edebiyat & Felsefe Asistanı</title>
+  <meta name="description" content="Claude'a bağlı edebiyat ve felsefe sohbet asistanı." />
+
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <meta name="theme-color" content="#1b1a17" />
+  <link rel="icon" href="/static/icons/icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="/static/icons/icon-192.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Mısra" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&display=swap" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <svg class="leaf" viewBox="0 0 120 210" role="img" aria-label="Cennet ağacı yaprağı" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <path id="leaflet" d="M0,0 Q16,-8 38,-2 Q20,2 14,3 Q12,6 9,4 Q4,4 0,0 Z" />
+      </defs>
+      <g fill="currentColor" stroke="none">
+        <path d="M60,206 C58,206 58,201 59,196 C60,150 61,150 60,96 C60,60 60,40 60,14"
+              fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" />
+        <use href="#leaflet" transform="translate(60,190) rotate(-26) scale(1.05)" />
+        <use href="#leaflet" transform="translate(60,190) scale(-1,1) rotate(-26) scale(1.05)" />
+        <use href="#leaflet" transform="translate(60,166) rotate(-27) scale(1)" />
+        <use href="#leaflet" transform="translate(60,166) scale(-1,1) rotate(-27) scale(1)" />
+        <use href="#leaflet" transform="translate(60,142) rotate(-28) scale(0.94)" />
+        <use href="#leaflet" transform="translate(60,142) scale(-1,1) rotate(-28) scale(0.94)" />
+        <use href="#leaflet" transform="translate(60,118) rotate(-30) scale(0.86)" />
+        <use href="#leaflet" transform="translate(60,118) scale(-1,1) rotate(-30) scale(0.86)" />
+        <use href="#leaflet" transform="translate(60,95) rotate(-32) scale(0.76)" />
+        <use href="#leaflet" transform="translate(60,95) scale(-1,1) rotate(-32) scale(0.76)" />
+        <use href="#leaflet" transform="translate(60,73) rotate(-36) scale(0.64)" />
+        <use href="#leaflet" transform="translate(60,73) scale(-1,1) rotate(-36) scale(0.64)" />
+        <use href="#leaflet" transform="translate(60,52) rotate(-42) scale(0.5)" />
+        <use href="#leaflet" transform="translate(60,52) scale(-1,1) rotate(-42) scale(0.5)" />
+        <use href="#leaflet" transform="translate(60,14) rotate(-90) scale(0.6)" />
+      </g>
+    </svg>
+    <div class="wordmark">
+      <h1>Mısra</h1>
+      <span class="subtitle">edebiyat &amp; felsefe asistanı</span>
+    </div>
+  </header>
+
+  <main id="chat" class="chat" aria-live="polite">
+    <div class="msg assistant">
+      <div class="bubble">
+        Merhaba. Ben Mısra. Şiir, roman, felsefe — ne konuşmak istersin?
+      </div>
+    </div>
+  </main>
+
+  <form id="composer" class="composer">
+    <textarea id="input" rows="1" placeholder="Bir şeyler yaz…" autocomplete="off"></textarea>
+    <button id="send" type="submit" aria-label="Gönder">↑</button>
+  </form>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
