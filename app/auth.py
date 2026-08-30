@@ -29,15 +29,20 @@ def _now() -> datetime:
 
 def auth_enabled() -> bool:
     s = get_settings()
-    return bool(s.user_login and s.user_password)
+    return bool(s.user_login.strip() and s.user_password.strip())
+
+
+def _eq(a: str, b: str) -> bool:
+    # secrets.compare_digest str'de yalnız ASCII kabul eder; UTF-8 bayta çevir
+    return secrets.compare_digest(a.encode("utf-8"), b.encode("utf-8"))
 
 
 def check_credentials(username: str, password: str) -> bool:
     s = get_settings()
     # sabit zamanlı karşılaştırma; ikisi de eşleşmeli
-    ok_user = secrets.compare_digest(username.strip(), s.user_login)
-    ok_pass = secrets.compare_digest(password, s.user_password)
-    return ok_user and ok_pass
+    return _eq(username.strip(), s.user_login.strip()) and _eq(
+        password, s.user_password.strip()
+    )
 
 
 # --------------------------------------------------------------------------- #

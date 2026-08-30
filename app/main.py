@@ -34,6 +34,9 @@ log = logging.getLogger("misra")
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 STATIC_DIR = BASE_DIR / "static"
+# HTML şablonları static dışında tutulur ki giriş yapmadan /static/index.html
+# üzerinden sohbet ekranına erişilemesin.
+TEMPLATES_DIR = BASE_DIR / "templates"
 
 
 @asynccontextmanager
@@ -64,13 +67,13 @@ def _conv_dict(c: Conversation) -> dict:
 async def index(request: Request) -> HTMLResponse:
     # Giriş zorunluysa ve oturum yoksa: giriş sayfasını göster.
     if auth.auth_enabled() and await auth.optional_user(request) is None:
-        return HTMLResponse((STATIC_DIR / "login.html").read_text(encoding="utf-8"))
+        return HTMLResponse((TEMPLATES_DIR / "login.html").read_text(encoding="utf-8"))
 
     # %OG_BASE% yer tutucusunu isteğin mutlak adresiyle değiştir — böylece
     # og:image / og:url link önizlemelerinde (WhatsApp, Telegram) mutlak URL olur.
     # Ters vekil arkasında doğru şema/host için uvicorn'u --proxy-headers ile çalıştır.
     base = str(request.base_url).rstrip("/")
-    html_text = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    html_text = (TEMPLATES_DIR / "index.html").read_text(encoding="utf-8")
     html_text = html_text.replace("%OG_BASE%", base).replace(
         "%AUTH%", "1" if auth.auth_enabled() else ""
     )
@@ -99,7 +102,7 @@ def _set_session_cookie(response, request: Request, token: str) -> None:
 async def login_page(request: Request):
     if not auth.auth_enabled() or await auth.optional_user(request) is not None:
         return RedirectResponse("/", status_code=303)
-    return HTMLResponse((STATIC_DIR / "login.html").read_text(encoding="utf-8"))
+    return HTMLResponse((TEMPLATES_DIR / "login.html").read_text(encoding="utf-8"))
 
 
 class LoginRequest(BaseModel):

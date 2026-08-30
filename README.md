@@ -56,7 +56,8 @@ Tarayıcıda: http://localhost:8000
 | `app/notify.py` | Resend API ile geri bildirim e-posta bildirimi |
 | `app/auth.py` | Kullanıcı adı + şifre girişi: oturum / bağımlılıklar |
 | `app/config.py` | `.env` / ortam değişkeni ayarları |
-| `static/index.html` `login.html` `style.css` `app.js` | Chat arayüzü + giriş sayfası |
+| `templates/index.html` `login.html` | Chat arayüzü + giriş sayfası (static dışında — giriş yapmadan erişilemez) |
+| `static/style.css` `app.js` | Arayüz stilleri + betiği |
 | `static/manifest.webmanifest` `service-worker.js` | PWA |
 | `static/icons/` | Uygulama ikonları + `og-image.png` (link önizlemesi) |
 
@@ -91,8 +92,12 @@ Karşılaştırma sabit zamanlıdır (`secrets.compare_digest`). Oturumlar `logi
 tablosunda opak jeton olarak tutulur; **konuşma geçmişi (`conversations`/`messages`)
 bu sistemden tamamen bağımsızdır, hiçbir mesaj silinmez.**
 
-Tüm `/api/*` uçları ve `/` sayfası bu oturuma bağlıdır. **`/admin` bundan bağımsızdır**,
-kendi `ADMIN_PASSWORD` korumasını kullanır.
+Giriş yapılmadan hiçbir sohbet ekranı ya da geçmiş konuşma görüntülenemez: tüm
+`/api/*` uçları 401 döner ve `index.html` `static/` dışında (`templates/`) tutulduğu
+için doğrudan indirilemez. **`/admin` bundan bağımsızdır**, kendi `ADMIN_PASSWORD`
+korumasını kullanır.
+
+Kullanıcı adı UTF-8 destekler (ör. `barış`).
 
 > Üretimde çereze `Secure` bayrağı isteğin şemasına göre konur — ters vekil arkasında
 > `uvicorn ... --proxy-headers` şart.
