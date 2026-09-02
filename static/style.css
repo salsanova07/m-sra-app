@@ -206,29 +206,36 @@ html, body {
 
 @keyframes blink { 50% { opacity: 0; } }
 
-/* ---- Mesaj altı işlem düğmeleri (PDF yap / Panoya ekle) ---- */
+/* ---- Mesaj altı işlem düğmeleri ---- */
 .bubble-actions {
   display: flex;
-  gap: 4px;
+  gap: 2px;
   margin-top: 6px;
   opacity: 0;
   transition: opacity 0.12s;
 }
+.bubble-actions[hidden] { display: none; }
 .bubble:hover .bubble-actions,
 .bubble:focus-within .bubble-actions { opacity: 1; }
 
 .act {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: none;
   background: none;
   cursor: pointer;
-  font-size: 0.9rem;
+  font-size: 0.95rem;
   line-height: 1;
-  padding: 3px 5px;
+  padding: 4px;
   border-radius: 6px;
   color: var(--muted);
 }
-.act:hover { background: rgba(255, 255, 255, 0.08); }
+.act svg { display: block; }
+.act:hover { background: rgba(255, 255, 255, 0.08); color: var(--text); }
 .act:disabled { opacity: 0.5; cursor: default; }
+.act.busy { opacity: 0.5; }
+.act.ok { color: #8fbf8a; }
 
 @media (max-width: 720px) {
   .bubble-actions { opacity: 1; }
@@ -239,6 +246,33 @@ html, body {
   margin-top: 8px;
   font-size: 0.9rem;
   color: var(--accent);
+}
+
+/* ---- Mesaj düzenleme ---- */
+.content[hidden] { display: none; }
+.edit-box { margin-top: 4px; }
+.edit-area {
+  width: 100%;
+  min-height: 72px;
+  font: inherit;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid #4a463c;
+  background: var(--bg);
+  color: var(--text);
+  resize: vertical;
+}
+.edit-area:focus { outline: 2px solid var(--accent); }
+.edit-bar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 6px;
+}
+.btn-primary.sm,
+.btn-ghost.sm {
+  padding: 5px 12px;
+  font-size: 0.85rem;
 }
 
 /* ---- Kenar panel sekmeleri ---- */
@@ -268,6 +302,11 @@ html, body {
   font-size: 0.9rem;
 }
 .pin-item:hover { background: #2f2c26; }
+@keyframes pin-flash {
+  from { background: rgba(201, 162, 39, 0.42); }
+  to { background: transparent; }
+}
+.pin-item.flash { animation: pin-flash 1.8s ease-out; }
 .pin-text {
   display: -webkit-box;
   -webkit-line-clamp: 4;

@@ -19,7 +19,7 @@ from fastapi.responses import (
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import auth
@@ -195,7 +195,9 @@ async def conversation_messages(
     return {
         "id": conv.id,
         "title": conv.title,
-        "messages": [{"role": m.role, "content": m.content} for m in rows],
+        "messages": [
+            {"id": m.id, "role": m.role, "content": m.content} for m in rows
+        ],
     }
 
 
@@ -216,21 +218,38 @@ async def delete_conversation(
 # --------------------------------------------------------------------------- #
 class ChatRequest(BaseModel):
     conversation_id: int
-    content: str = Field(min_length=1, max_length=20000)
+    content: str | None = Field(default=None, min_length=1, max_length=20000)
+    # verilirse: bu id'den itibaren (>=) mesajları sil — düzenle / yeniden oluştur
+    truncate_from_id: int | None = None
 
 
 @app.post("/api/chat", dependencies=[Depends(require_user)])
 async def chat(req: ChatRequest) -> StreamingResponse:
-    """Yeni kullanıcı mesajını ilgili konuşmaya kaydeder, Claude'un yanıtını
-    akıtır ve yanıt tamamlanınca onu da kaydeder.
+    """Sohbet yanıtını SSE ile akıtır.
+
+    - Normal: `content` verilir → yeni kullanıcı mesajı eklenir.
+    - Düzenle: `content` + `truncate_from_id` (düzenlenen kullanıcı mesajının id'si)
+      → o mesaj ve sonrası silinir, düzenlenen metin yeni mesaj olarak eklenir.
+    - Yeniden oluştur: yalnız `truncate_from_id` (asistan mesajının id'si) → o mesaj
+      ve sonrası silinir, mevcut geçmişten yeni bir yanıt üretilir.
 
     Not: StreamingResponse gövdesi handler döndükten sonra çalıştığı için
     DB işlemleri `Depends` yerine doğrudan `SessionMaker` ile yapılır.
     """
+    user_msg_id: int | None = None
     async with SessionMaker() as session:
         conv = await session.get(Conversation, req.conversation_id)
         if conv is None:
             raise HTTPException(status_code=404, detail="Konuşma bulunamadı")
+
+        if req.truncate_from_id is not None:
+            await session.execute(
+                delete(Message).where(
+                    Message.conversation_id == conv.id,
+                    Message.id >= req.truncate_from_id,
+                )
+            )
+            await session.commit()
 
         rows = (
             await session.execute(
@@ -241,11 +260,26 @@ async def chat(req: ChatRequest) -> StreamingResponse:
         ).scalars().all()
         history = [{"role": m.role, "content": m.content} for m in rows]
 
-        session.add(Message(conversation_id=conv.id, role="user", content=req.content))
-        if not rows:  # ilk mesaj → başlığı ondan türet
-            conv.title = _title_from(req.content)
-        conv.updated_at = datetime.now(timezone.utc)
-        await session.commit()
+        if req.content is not None:
+            new_msg = Message(
+                conversation_id=conv.id, role="user", content=req.content
+            )
+            session.add(new_msg)
+            if not rows:  # ilk mesaj → başlığı ondan türet
+                conv.title = _title_from(req.content)
+            conv.updated_at = datetime.now(timezone.utc)
+            await session.commit()
+            await session.refresh(new_msg)
+            user_msg_id = new_msg.id
+            history.append({"role": "user", "content": req.content})
+        else:
+            conv.updated_at = datetime.now(timezone.utc)
+            await session.commit()
+
+        if not history or history[-1]["role"] != "user":
+            raise HTTPException(
+                status_code=400, detail="Yanıt üretilecek bir kullanıcı mesajı yok."
+            )
         title = conv.title
 
         # Pano bağlamı: Claude "panodaki şu öğe" isteğini pin_id ile çözebilsin
@@ -259,8 +293,6 @@ async def chat(req: ChatRequest) -> StreamingResponse:
                 "\n\nKullanıcının panosundaki öğeler (create_pdf'i pin_id ile "
                 f"çağırabilirsin):\n{listing}"
             )
-
-    history.append({"role": "user", "content": req.content})
 
     async def _make_pdf(*, text=None, pin_id=None, title=None):
         async with SessionMaker() as s:
@@ -296,21 +328,30 @@ async def chat(req: ChatRequest) -> StreamingResponse:
             acc += chunk
             yield _sse({"delta": chunk})
 
+        assistant_msg_id: int | None = None
         if acc.strip():
             async with SessionMaker() as session:
-                session.add(
-                    Message(
-                        conversation_id=req.conversation_id,
-                        role="assistant",
-                        content=acc,
-                    )
+                msg = Message(
+                    conversation_id=req.conversation_id,
+                    role="assistant",
+                    content=acc,
                 )
+                session.add(msg)
                 conv = await session.get(Conversation, req.conversation_id)
                 if conv is not None:
                     conv.updated_at = datetime.now(timezone.utc)
                 await session.commit()
+                await session.refresh(msg)
+                assistant_msg_id = msg.id
 
-        yield _sse({"done": True, "title": title})
+        yield _sse(
+            {
+                "done": True,
+                "title": title,
+                "user_message_id": user_msg_id,
+                "assistant_message_id": assistant_msg_id,
+            }
+        )
 
     return StreamingResponse(
         event_stream(),

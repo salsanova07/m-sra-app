@@ -108,11 +108,22 @@ Kullanıcı adı UTF-8 destekler (ör. `barış`).
 > Üretimde çereze `Secure` bayrağı isteğin şemasına göre konur — ters vekil arkasında
 > `uvicorn ... --proxy-headers` şart.
 
+## Mesaj işlemleri
+
+Her mesajın altında (farenle üstüne gelince; mobilde hep görünür) sade çizgi ikonlar:
+
+- **Kopyala** — düz metni tarayıcı panosuna kopyalar (bu, aşağıdaki "Pano" özelliğiyle ilgisizdir).
+- **Düzenle** (yalnız kullanıcı mesajı) — mesajı düzenleyip tekrar gönderirsin; o mesajdan
+  sonraki geçmiş silinir ve yeni cevap üretilir.
+- **Yeniden oluştur** (yalnız Mısra'nın cevabı) — aynı soruya yeni bir cevap ürettirir.
+- **PDF yap** ve **Panoya ekle** (aşağıya bakın).
+
 ## Pano
 
-Sol panelde **Konuşmalar / Pano** sekmesi var. Her mesajın altındaki 📌 ile o metni
-panoya sabitlersin; pano öğeleri konuşmalardan bağımsız durur. Her pano öğesinin
-yanında 📄 (PDF yap) ve × (kaldır) düğmeleri vardır.
+Sol panelde **Konuşmalar / Pano** sekmesi var. Bir mesajın altındaki 📌 ile o metni
+panoya eklersin — arayüz otomatik olarak Pano sekmesine geçer ve yeni öğe kısa bir
+vurgu (highlight) ile belirir. Pano öğeleri konuşmalardan bağımsız durur; her birinin
+yanında 📄 (PDF yap) ve × (kaldır) vardır.
 
 ## PDF'e dönüştürme
 
