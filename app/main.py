@@ -27,8 +27,9 @@ from .auth import require_user
 from .claude_client import stream_reply
 from .config import get_settings
 from .db import SessionMaker, engine, get_session, init_db
-from .models import Conversation, Feedback, Message
+from .models import Conversation, Feedback, Message, PdfFile, Pin
 from .notify import send_feedback_email
+from .pdf import pdf_path, save_pdf
 
 log = logging.getLogger("misra")
 
@@ -247,20 +248,55 @@ async def chat(req: ChatRequest) -> StreamingResponse:
         await session.commit()
         title = conv.title
 
+        # Pano bağlamı: Claude "panodaki şu öğe" isteğini pin_id ile çözebilsin
+        pins = (await session.execute(select(Pin).order_by(Pin.id))).scalars().all()
+        pano_ctx = ""
+        if pins:
+            listing = "\n".join(
+                f"- pin_id {p.id}: {' '.join(p.content.split())[:160]}" for p in pins
+            )
+            pano_ctx = (
+                "\n\nKullanıcının panosundaki öğeler (create_pdf'i pin_id ile "
+                f"çağırabilirsin):\n{listing}"
+            )
+
     history.append({"role": "user", "content": req.content})
+
+    async def _make_pdf(*, text=None, pin_id=None, title=None):
+        async with SessionMaker() as s:
+            if pin_id is not None:
+                pin = await s.get(Pin, int(pin_id))
+                if pin is None:
+                    raise ValueError(f"panoda {pin_id} numaralı öğe yok")
+                text = pin.content
+            return await save_pdf(s, text or "", title)
+
+    def _sse(obj: dict) -> str:
+        return f"data: {json.dumps(obj, ensure_ascii=False)}\n\n"
 
     async def event_stream() -> AsyncIterator[str]:
         acc = ""
+        pdf_links: list[str] = []
         try:
-            async for chunk in stream_reply(history):
-                acc += chunk
-                yield f"data: {json.dumps({'delta': chunk}, ensure_ascii=False)}\n\n"
+            async for ev in stream_reply(
+                history, make_pdf=_make_pdf, system_extra=pano_ctx
+            ):
+                if ev["type"] == "text":
+                    acc += ev["text"]
+                    yield _sse({"delta": ev["text"]})
+                elif ev["type"] == "pdf":
+                    pdf_links.append(f"📄 [{ev['filename']}](/pdf/{ev['token']})")
         except anthropic.APIError as exc:
-            yield f"data: {json.dumps({'error': f'API hatası: {exc}'}, ensure_ascii=False)}\n\n"
+            yield _sse({"error": f"API hatası: {exc}"})
         except Exception as exc:  # ör. eksik API anahtarı
-            yield f"data: {json.dumps({'error': f'Sunucu hatası: {exc}'}, ensure_ascii=False)}\n\n"
+            yield _sse({"error": f"Sunucu hatası: {exc}"})
 
-        if acc:
+        for link in pdf_links:  # linkleri metnin sonuna ekle
+            chunk = f"\n\n{link}"
+            acc += chunk
+            yield _sse({"delta": chunk})
+
+        if acc.strip():
             async with SessionMaker() as session:
                 session.add(
                     Message(
@@ -274,7 +310,7 @@ async def chat(req: ChatRequest) -> StreamingResponse:
                     conv.updated_at = datetime.now(timezone.utc)
                 await session.commit()
 
-        yield f"data: {json.dumps({'done': True, 'title': title}, ensure_ascii=False)}\n\n"
+        yield _sse({"done": True, "title": title})
 
     return StreamingResponse(
         event_stream(),
@@ -306,6 +342,69 @@ async def create_feedback(
         log.warning("Geri bildirim e-postası gönderilemedi", exc_info=True)
 
     return {"id": fb.id}
+
+
+# --------------------------------------------------------------------------- #
+# Pano (sabitlenen öğeler)
+# --------------------------------------------------------------------------- #
+class PinRequest(BaseModel):
+    content: str = Field(min_length=1, max_length=20000)
+
+
+@app.get("/api/pins", dependencies=[Depends(require_user)])
+async def list_pins(session: AsyncSession = Depends(get_session)) -> list[dict]:
+    rows = (
+        await session.execute(select(Pin).order_by(Pin.created_at.desc(), Pin.id.desc()))
+    ).scalars().all()
+    return [{"id": p.id, "content": p.content} for p in rows]
+
+
+@app.post("/api/pins", status_code=201, dependencies=[Depends(require_user)])
+async def create_pin(
+    body: PinRequest, session: AsyncSession = Depends(get_session)
+) -> dict:
+    pin = Pin(content=body.content.strip())
+    session.add(pin)
+    await session.commit()
+    await session.refresh(pin)
+    return {"id": pin.id, "content": pin.content}
+
+
+@app.delete("/api/pins/{pin_id}", status_code=204, dependencies=[Depends(require_user)])
+async def delete_pin(
+    pin_id: int, session: AsyncSession = Depends(get_session)
+) -> None:
+    pin = await session.get(Pin, pin_id)
+    if pin is not None:
+        await session.delete(pin)
+        await session.commit()
+
+
+# --------------------------------------------------------------------------- #
+# PDF — buton yolu ile üretim + indirme
+# --------------------------------------------------------------------------- #
+class PdfRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=200_000)
+    title: str | None = Field(default=None, max_length=200)
+
+
+@app.post("/api/pdf", dependencies=[Depends(require_user)])
+async def make_pdf_endpoint(
+    body: PdfRequest, session: AsyncSession = Depends(get_session)
+) -> dict:
+    token, filename = await save_pdf(session, body.text, body.title)
+    return {"url": f"/pdf/{token}", "filename": filename}
+
+
+@app.get("/pdf/{token}", dependencies=[Depends(require_user)])
+async def download_pdf(
+    token: str, session: AsyncSession = Depends(get_session)
+) -> FileResponse:
+    row = await session.scalar(select(PdfFile).where(PdfFile.token == token))
+    path = pdf_path(token)
+    if row is None or not path.exists():
+        raise HTTPException(status_code=404, detail="PDF bulunamadı ya da süresi doldu.")
+    return FileResponse(path, media_type="application/pdf", filename=row.filename)
 
 
 # --------------------------------------------------------------------------- #

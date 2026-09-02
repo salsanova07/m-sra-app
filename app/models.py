@@ -58,6 +58,31 @@ class Feedback(Base):
     )
 
 
+class Pin(Base):
+    """Panoya sabitlenmiş bir metin parçası (mesajdan ya da elle)."""
+
+    __tablename__ = "pins"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    content: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class PdfFile(Base):
+    """Sunucuda geçici tutulan bir PDF dosyasının kaydı (indirme linki için)."""
+
+    __tablename__ = "pdf_files"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    token: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    filename: Mapped[str] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 class LoginSession(Base):
     """Uzun ömürlü (1 yıl) oturum — çerezdeki jetonla eşleşir.
 

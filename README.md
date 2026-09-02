@@ -50,16 +50,19 @@ Tarayıcıda: http://localhost:8000
 | Dosya | Görev |
 |---|---|
 | `app/main.py` | FastAPI uygulaması, rotalar, SSE chat endpoint'i |
-| `app/claude_client.py` | Claude API bağlantısı, sistem promptu, streaming yanıt |
+| `app/claude_client.py` | Claude API bağlantısı, sistem promptu, `create_pdf` aracı, streaming |
 | `app/db.py` | Async SQLAlchemy motoru, oturum, tablo oluşturma |
-| `app/models.py` | `Conversation`, `Message`, `Feedback`, `LoginSession` |
+| `app/models.py` | `Conversation`, `Message`, `Feedback`, `Pin`, `PdfFile`, `LoginSession` |
+| `app/pdf.py` | Kitap tarzı PDF üretimi (A5, iki yana yaslı, Merriweather) + geçici saklama |
 | `app/notify.py` | Resend API ile geri bildirim e-posta bildirimi |
 | `app/auth.py` | Kullanıcı adı + şifre girişi: oturum / bağımlılıklar |
 | `app/config.py` | `.env` / ortam değişkeni ayarları |
+| `assets/fonts/` | Merriweather statik TTF'leri (PDF için, repoda) |
 | `templates/index.html` `login.html` | Chat arayüzü + giriş sayfası (static dışında — giriş yapmadan erişilemez) |
 | `static/style.css` `app.js` | Arayüz stilleri + betiği |
 | `static/manifest.webmanifest` `service-worker.js` | PWA |
 | `static/icons/` | Uygulama ikonları + `og-image.png` (link önizlemesi) |
+| `pdfs/` | Geçici üretilen PDF'ler (gitignore, 24 saat sonra silinir) |
 
 ## API
 
@@ -71,6 +74,9 @@ Tarayıcıda: http://localhost:8000
 | `DELETE` | `/api/conversations/{id}` | Konuşmayı ve mesajlarını siler |
 | `POST` | `/api/chat` | `{conversation_id, content}` → yanıtı SSE ile akıtır, iki tarafı da DB'ye yazar |
 | `POST` | `/api/feedback` | `{kind: "suggestion"\|"bug", message}` → DB'ye yazar, e-posta bildirir |
+| `GET` `POST` `DELETE` | `/api/pins[/{id}]` | Panoya sabitlenen metinler: listele / ekle / kaldır |
+| `POST` | `/api/pdf` | `{text, title?}` → metni PDF'e çevirir, `{url, filename}` döner |
+| `GET` | `/pdf/{token}` | Üretilen PDF'i indirir (24 saat geçerli) |
 | `GET` | `/admin` | Şifre korumalı (HTTP Basic) geri bildirim listesi, tarih sırası |
 | `GET` | `/login` | Kullanıcı adı + şifre giriş formu (auth kapalıysa `/`'a yönlendirir) |
 | `POST` | `/api/login` | `{username, password}` → doğruysa 1 yıllık oturum çerezi; yanlışsa 401 |
@@ -102,6 +108,27 @@ Kullanıcı adı UTF-8 destekler (ör. `barış`).
 > Üretimde çereze `Secure` bayrağı isteğin şemasına göre konur — ters vekil arkasında
 > `uvicorn ... --proxy-headers` şart.
 
+## Pano
+
+Sol panelde **Konuşmalar / Pano** sekmesi var. Her mesajın altındaki 📌 ile o metni
+panoya sabitlersin; pano öğeleri konuşmalardan bağımsız durur. Her pano öğesinin
+yanında 📄 (PDF yap) ve × (kaldır) düğmeleri vardır.
+
+## PDF'e dönüştürme
+
+İki yol, aynı mantık — kitap tarzı (A5, iki yana yaslı, Merriweather):
+
+1. **Buton:** her mesajın ve her pano öğesinin altındaki 📄 → metni PDF yapar,
+   yanında indirme linki belirir.
+2. **Doğal dil:** sohbette "bunu PDF yap", "PDF olarak çıkar", "şunu PDF'e dönüştür"
+   yazınca Claude `create_pdf` aracını çağırır. Hangi metin olduğunu bağlamdan çıkarır
+   (son mesaj, önceki bir mesaj ya da `pin_id` ile panodaki bir öğe); belirsizse önce
+   kısa bir soru sorar. Link asistanın yanıtının sonuna eklenir ve mesajla kaydedilir.
+
+PDF'ler `pdfs/` altında **24 saat** tutulur, sonra bir sonraki üretimde temizlenir.
+`GET /pdf/{token}` girişe bağlıdır. Merriweather statik TTF'leri `assets/fonts/`
+içinde repoda gelir (OFL).
+
 ## Geri bildirim
 
 - Arayüzde sol panelin altındaki **Öneri / Hata Bildir** butonu kısa bir form açar
@@ -117,6 +144,8 @@ Kullanıcı adı UTF-8 destekler (ör. `barış`).
 - **conversations**: `id`, `title` (ilk mesajdan türetilir), `created_at`, `updated_at`
 - **messages**: `id`, `conversation_id` (FK, cascade delete), `role`, `content`, `created_at`
 - **feedback**: `id`, `kind` (`suggestion` \| `bug`), `message`, `created_at`
+- **pins**: `id`, `content`, `created_at` — panoya sabitlenen metinler
+- **pdf_files**: `id`, `token`, `filename`, `created_at` — geçici PDF kayıtları
 - **login_sessions**: `id`, `token`, `email` (kullanıcı adını tutar), `expires_at` — 1 yıl
 
 > Eski magic-link sürümünden kalan `login_tokens` tablosu artık kullanılmıyor;

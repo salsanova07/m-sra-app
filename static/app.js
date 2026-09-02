@@ -3,7 +3,10 @@ const form = document.getElementById("composer");
 const input = document.getElementById("input");
 const sendBtn = document.getElementById("send");
 const convList = document.getElementById("conv-list");
+const pinList = document.getElementById("pin-list");
 const newConvBtn = document.getElementById("new-conv");
+const tabConv = document.getElementById("tab-conv");
+const tabPin = document.getElementById("tab-pin");
 const sidebar = document.getElementById("sidebar");
 const overlay = document.getElementById("overlay");
 const menuBtn = document.getElementById("menu-btn");
@@ -24,18 +27,58 @@ async function apiFetch(url, opts) {
 }
 
 // --------------------------------------------------------------------------- //
+// Metin render (güvenli): [etiket](/pdf/... | http...) → tıklanabilir link
+// --------------------------------------------------------------------------- //
+function renderText(el, text) {
+  const esc = (s) =>
+    s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  el.innerHTML = esc(text).replace(
+    /\[([^\]]+)\]\((\/pdf\/[A-Za-z0-9_-]+|https?:\/\/[^\s)]+)\)/g,
+    (_, label, url) => `<a href="${url}" target="_blank" rel="noopener">${label}</a>`,
+  );
+}
+
+// --------------------------------------------------------------------------- //
 // Mesaj balonları
 // --------------------------------------------------------------------------- //
 function addBubble(role, text = "") {
   const wrap = document.createElement("div");
   wrap.className = `msg ${role}`;
+
   const bubble = document.createElement("div");
   bubble.className = "bubble";
-  bubble.textContent = text;
+
+  const content = document.createElement("div");
+  content.className = "content";
+  renderText(content, text);
+  bubble.appendChild(content);
+
+  const actions = document.createElement("div");
+  actions.className = "bubble-actions";
+
+  const pdfBtn = document.createElement("button");
+  pdfBtn.type = "button";
+  pdfBtn.className = "act";
+  pdfBtn.title = "PDF yap";
+  pdfBtn.textContent = "📄";
+  pdfBtn.addEventListener("click", () =>
+    makePdf(content.textContent, pdfBtn, bubble),
+  );
+
+  const pinBtn = document.createElement("button");
+  pinBtn.type = "button";
+  pinBtn.className = "act";
+  pinBtn.title = "Panoya ekle";
+  pinBtn.textContent = "📌";
+  pinBtn.addEventListener("click", () => pinText(content.textContent, pinBtn));
+
+  actions.append(pdfBtn, pinBtn);
+  bubble.appendChild(actions);
+
   wrap.appendChild(bubble);
   chat.appendChild(wrap);
   chat.scrollTop = chat.scrollHeight;
-  return bubble;
+  return content; // çağıran taraf bunu günceller
 }
 
 function renderMessages(messages) {
@@ -48,7 +91,81 @@ function renderMessages(messages) {
 }
 
 // --------------------------------------------------------------------------- //
-// Konuşma listesi / paneli
+// PDF ve pano işlemleri (buton yolu)
+// --------------------------------------------------------------------------- //
+function attachPdfLink(container, url, filename) {
+  let link = container.querySelector(".pdf-link");
+  if (!link) {
+    link = document.createElement("a");
+    link.className = "pdf-link";
+    container.appendChild(link);
+  }
+  link.href = url;
+  link.target = "_blank";
+  link.rel = "noopener";
+  link.textContent = "📄 " + filename;
+}
+
+async function makePdf(text, btn, container) {
+  text = (text || "").trim();
+  if (!text) return;
+  btn.disabled = true;
+  const old = btn.textContent;
+  btn.textContent = "…";
+  try {
+    const res = await apiFetch("/api/pdf", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const { url, filename } = await res.json();
+    attachPdfLink(container, url, filename);
+  } catch (_) {
+    btn.title = "PDF oluşturulamadı, tekrar dene";
+  } finally {
+    btn.textContent = old;
+    btn.disabled = false;
+  }
+}
+
+async function pinText(text, btn) {
+  text = (text || "").trim();
+  if (!text) return;
+  btn.disabled = true;
+  try {
+    const res = await apiFetch("/api/pins", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: text }),
+    });
+    if (res.ok) {
+      btn.textContent = "✓";
+      setTimeout(() => (btn.textContent = "📌"), 1500);
+      loadPins();
+    }
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// --------------------------------------------------------------------------- //
+// Kenar panel: sekmeler
+// --------------------------------------------------------------------------- //
+function switchTab(which) {
+  const pin = which === "pin";
+  tabPin.classList.toggle("active", pin);
+  tabConv.classList.toggle("active", !pin);
+  convList.hidden = pin;
+  newConvBtn.hidden = pin;
+  pinList.hidden = !pin;
+  if (pin) loadPins();
+}
+tabConv.addEventListener("click", () => switchTab("conv"));
+tabPin.addEventListener("click", () => switchTab("pin"));
+
+// --------------------------------------------------------------------------- //
+// Konuşma listesi
 // --------------------------------------------------------------------------- //
 async function loadConversations() {
   const res = await apiFetch("/api/conversations");
@@ -115,6 +232,55 @@ async function deleteConversation(id) {
 }
 
 // --------------------------------------------------------------------------- //
+// Pano listesi
+// --------------------------------------------------------------------------- //
+async function loadPins() {
+  const res = await apiFetch("/api/pins");
+  const items = await res.json();
+  pinList.innerHTML = "";
+  if (!items.length) {
+    const li = document.createElement("li");
+    li.className = "pin-empty";
+    li.textContent = "Pano boş. Bir mesajın yanındaki 📌 ile ekleyebilirsin.";
+    pinList.appendChild(li);
+    return;
+  }
+  for (const p of items) {
+    const li = document.createElement("li");
+    li.className = "pin-item";
+
+    const txt = document.createElement("div");
+    txt.className = "pin-text";
+    txt.textContent = p.content;
+    li.appendChild(txt);
+
+    const row = document.createElement("div");
+    row.className = "pin-actions";
+
+    const pdfB = document.createElement("button");
+    pdfB.type = "button";
+    pdfB.className = "act";
+    pdfB.title = "PDF yap";
+    pdfB.textContent = "📄";
+    pdfB.addEventListener("click", () => makePdf(p.content, pdfB, li));
+
+    const delB = document.createElement("button");
+    delB.type = "button";
+    delB.className = "act";
+    delB.title = "Panodan kaldır";
+    delB.textContent = "×";
+    delB.addEventListener("click", async () => {
+      await apiFetch(`/api/pins/${p.id}`, { method: "DELETE" });
+      loadPins();
+    });
+
+    row.append(pdfB, delB);
+    li.appendChild(row);
+    pinList.appendChild(li);
+  }
+}
+
+// --------------------------------------------------------------------------- //
 // Panel aç/kapa (dar ekran)
 // --------------------------------------------------------------------------- //
 function openSidebar() {
@@ -156,10 +322,10 @@ form.addEventListener("submit", async (e) => {
   input.disabled = sendBtn.disabled = true;
 
   // Karşılama balonu varsa (boş konuşma) ilk mesajda temizle
-  const onlyGreeting =
-    chat.children.length === 1 &&
-    chat.querySelector(".msg.assistant .bubble")?.textContent === GREETING;
-  if (onlyGreeting) chat.innerHTML = "";
+  const first = chat.querySelector(".msg.assistant .content");
+  if (chat.children.length === 1 && first && first.textContent === GREETING) {
+    chat.innerHTML = "";
+  }
 
   addBubble("user", text);
   const reply = addBubble("assistant");
@@ -193,7 +359,7 @@ form.addEventListener("submit", async (e) => {
 
         if (payload.delta) {
           acc += payload.delta;
-          reply.textContent = acc;
+          renderText(reply, acc);
           chat.scrollTop = chat.scrollHeight;
         } else if (payload.error) {
           throw new Error(payload.error);
@@ -202,7 +368,7 @@ form.addEventListener("submit", async (e) => {
     }
   } catch (err) {
     reply.classList.add("error");
-    reply.textContent = acc + `\n\n[Hata: ${err.message}]`;
+    renderText(reply, acc + `\n\n[Hata: ${err.message}]`);
   } finally {
     reply.classList.remove("pending");
     input.disabled = sendBtn.disabled = false;
@@ -234,20 +400,6 @@ feedbackBtn.addEventListener("click", () => {
 
 fbCancel.addEventListener("click", () => fbDialog.close());
 
-// --------------------------------------------------------------------------- //
-// Çıkış
-// --------------------------------------------------------------------------- //
-const logoutBtn = document.getElementById("logout-btn");
-logoutBtn?.addEventListener("click", async () => {
-  logoutBtn.disabled = true;
-  try {
-    await fetch("/logout", { method: "POST" });
-  } catch (_) {
-    /* yoksay */
-  }
-  window.location.href = "/login";
-});
-
 fbForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   const message = fbMessage.value.trim();
@@ -273,6 +425,20 @@ fbForm.addEventListener("submit", async (e) => {
   } finally {
     fbSend.disabled = false;
   }
+});
+
+// --------------------------------------------------------------------------- //
+// Çıkış
+// --------------------------------------------------------------------------- //
+const logoutBtn = document.getElementById("logout-btn");
+logoutBtn?.addEventListener("click", async () => {
+  logoutBtn.disabled = true;
+  try {
+    await fetch("/logout", { method: "POST" });
+  } catch (_) {
+    /* yoksay */
+  }
+  window.location.href = "/login";
 });
 
 // --------------------------------------------------------------------------- //

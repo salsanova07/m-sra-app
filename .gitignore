@@ -19,6 +19,9 @@ env/
 *.db
 *.sqlite3
 
+# Geçici olarak üretilen PDF'ler
+/pdfs/
+
 # Editör / OS
 .DS_Store
 .idea/

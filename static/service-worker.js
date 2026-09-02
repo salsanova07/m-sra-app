@@ -1,9 +1,9 @@
 // Basit PWA service worker.
 // - Statik varlıklar: cache-first (arka planda güncellenir)
 // - Sayfa gezinmeleri: network-first (giriş/oturum durumuna göre değişir)
-// - /api/*, /login, /logout : hiç dokunma, doğrudan ağ
+// - /api/*, /pdf/*, /login, /logout : hiç dokunma, doğrudan ağ
 
-const CACHE = "misra-v7";
+const CACHE = "misra-v8";
 const ASSETS = [
   "/static/style.css",
   "/static/app.js",
@@ -34,6 +34,7 @@ self.addEventListener("fetch", (event) => {
 
   const bypass =
     url.pathname.startsWith("/api/") ||
+    url.pathname.startsWith("/pdf/") ||
     url.pathname === "/admin" ||
     url.pathname === "/login" ||
     url.pathname === "/logout";
