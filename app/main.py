@@ -152,7 +152,9 @@ async def service_worker() -> FileResponse:
 
 
 @app.get("/health")
+@app.get("/healthz")
 async def health() -> dict:
+    # Yalnızca canlılık kontrolü — DB'ye ya da başka bir kaynağa dokunmaz.
     return {"status": "ok"}
 
 

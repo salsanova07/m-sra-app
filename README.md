@@ -81,6 +81,7 @@ Tarayıcıda: http://localhost:8000
 | `GET` | `/login` | Kullanıcı adı + şifre giriş formu (auth kapalıysa `/`'a yönlendirir) |
 | `POST` | `/api/login` | `{username, password}` → doğruysa 1 yıllık oturum çerezi; yanlışsa 401 |
 | `POST` | `/logout` | Oturumu ve çerezi siler |
+| `GET` | `/healthz` (`/health`) | Canlılık kontrolü — DB'ye dokunmadan `{"status": "ok"}` döner |
 
 ## Giriş (kullanıcı adı + şifre)
 
