@@ -1,8 +1,12 @@
-"""Kitap tarzı PDF üretimi (A5, iki yana yaslı, Merriweather).
+"""Kitap tarzı PDF üretimi (yazı tipi / hizalama / sayfa boyutu seçilebilir).
 
-Hem 'PDF yap' butonu hem de sohbet içindeki doğal dil komutu aynı bu mantığı
-kullanır. Dosyalar sunucuda `pdfs/` altında geçici tutulur (24 saat), indirme
-`GET /pdf/{token}` ile yapılır.
+Hem 'PDF'e dönüştür' formu hem de sohbet içindeki doğal dil komutu aynı bu
+mantığı kullanır. Dosyalar sunucuda `pdfs/` altında geçici tutulur (24 saat),
+indirme `GET /pdf/{token}` ile yapılır.
+
+Times New Roman ve Georgia tescilli fontlardır; sunucuya konamaz. Yerlerine
+metrik uyumlu, Türkçe karakter destekli açık fontlar kullanılır:
+  Times New Roman -> Tinos,  Georgia -> Gelasio.
 """
 import re
 import secrets
@@ -24,6 +28,25 @@ MAX_TEXT = 200_000
 
 PDF_DIR.mkdir(exist_ok=True)
 
+# Kullanıcıya gösterilen ad -> font dosyalarının ön eki (assets/fonts/<önek>-*.ttf)
+FONTS = {
+    "merriweather": "Merriweather",
+    "times": "Tinos",      # Times New Roman metrik eşi
+    "georgia": "Gelasio",  # Georgia metrik eşi
+}
+DEFAULT_FONT = "merriweather"
+
+ALIGN = {"left": "L", "center": "C", "right": "R", "justify": "J"}
+DEFAULT_ALIGN = "justify"
+
+# mm cinsinden açık ölçüler — fpdf2'nin ad tabanlı boyut uyarısını atlar
+PAGE_SIZES = {
+    "a4": (210, 297),
+    "a5": (148, 210),
+    "letter": (215.9, 279.4),
+}
+DEFAULT_PAGE_SIZE = "a5"
+
 
 def _slug(text: str) -> str:
     t = re.sub(r"[^\w\s-]", "", text, flags=re.UNICODE).strip().lower()
@@ -31,36 +54,47 @@ def _slug(text: str) -> str:
     return t[:60].strip("-") or "belge"
 
 
-def _register_fonts(pdf: FPDF) -> None:
-    pdf.add_font("Merriweather", "", str(FONT_DIR / "Merriweather-Regular.ttf"))
-    pdf.add_font("Merriweather", "B", str(FONT_DIR / "Merriweather-Bold.ttf"))
-    for style, name in (("I", "Merriweather-Italic.ttf"), ("BI", "Merriweather-BoldItalic.ttf")):
+def _register_fonts(pdf: FPDF, prefix: str) -> None:
+    pdf.add_font(prefix, "", str(FONT_DIR / f"{prefix}-Regular.ttf"))
+    pdf.add_font(prefix, "B", str(FONT_DIR / f"{prefix}-Bold.ttf"))
+    for style, name in (("I", f"{prefix}-Italic.ttf"), ("BI", f"{prefix}-BoldItalic.ttf")):
         path = FONT_DIR / name
         if path.exists():
-            pdf.add_font("Merriweather", style, str(path))
+            pdf.add_font(prefix, style, str(path))
 
 
-A5 = (148, 210)  # mm — açık ölçü (fpdf2'nin "A5" uyarısını atlar)
+def render_pdf(
+    text: str,
+    title: str | None = None,
+    *,
+    font: str = DEFAULT_FONT,
+    align: str = DEFAULT_ALIGN,
+    page_size: str = DEFAULT_PAGE_SIZE,
+) -> bytes:
+    prefix = FONTS.get(font, FONTS[DEFAULT_FONT])
+    fmt = PAGE_SIZES.get(page_size, PAGE_SIZES[DEFAULT_PAGE_SIZE])
+    body_align = ALIGN.get(align, ALIGN[DEFAULT_ALIGN])
 
+    # küçük sayfada dar, büyük sayfada geniş kenar boşluğu
+    margin_x, margin_y = (18, 18) if page_size == "a5" else (24, 22)
 
-def render_pdf(text: str, title: str | None = None) -> bytes:
-    pdf = FPDF(orientation="P", unit="mm", format=A5)
-    pdf.set_margins(left=18, top=18, right=16)  # kitap: iç kenar biraz geniş
-    pdf.set_auto_page_break(auto=True, margin=18)
-    _register_fonts(pdf)
+    pdf = FPDF(orientation="P", unit="mm", format=fmt)
+    pdf.set_margins(left=margin_x, top=margin_y, right=max(margin_x - 2, 10))
+    pdf.set_auto_page_break(auto=True, margin=margin_y)
+    _register_fonts(pdf, prefix)
     pdf.add_page()
 
     if title and title.strip():
-        pdf.set_font("Merriweather", "B", 15)
+        pdf.set_font(prefix, "B", 15)
         pdf.multi_cell(0, 8, title.strip(), align="C")
         pdf.ln(6)
 
-    pdf.set_font("Merriweather", "", 11)
+    pdf.set_font(prefix, "", 11)
     for para in re.split(r"\n\s*\n", text.strip()):
         para = para.strip()
         if not para:
             continue
-        pdf.multi_cell(0, 6.4, para, align="J")
+        pdf.multi_cell(0, 6.4, para, align=body_align)
         pdf.ln(3)
 
     return bytes(pdf.output())
@@ -79,7 +113,13 @@ async def _cleanup(session: AsyncSession) -> None:
 
 
 async def save_pdf(
-    session: AsyncSession, text: str, title: str | None = None
+    session: AsyncSession,
+    text: str,
+    title: str | None = None,
+    *,
+    font: str = DEFAULT_FONT,
+    align: str = DEFAULT_ALIGN,
+    page_size: str = DEFAULT_PAGE_SIZE,
 ) -> tuple[str, str]:
     """Metni PDF'e çevirir, diske yazar, kayıt açar. (token, dosya_adı) döndürür."""
     text = (text or "").strip()
@@ -87,7 +127,9 @@ async def save_pdf(
         raise ValueError("PDF için metin boş.")
     text = text[:MAX_TEXT]
 
-    data = await run_in_threadpool(render_pdf, text, title)
+    data = await run_in_threadpool(
+        render_pdf, text, title, font=font, align=align, page_size=page_size
+    )
     token = secrets.token_urlsafe(16)
     base = _slug(title) if title and title.strip() else _slug(text[:40])
     filename = f"{base}.pdf"

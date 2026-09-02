@@ -101,7 +101,7 @@ function addBubble(role, text = "", msgId = null) {
     actions.appendChild(iconBtn("retry", "Yeniden oluştur", () => retryMessage(content)));
   }
   actions.appendChild(
-    iconBtn("pdf", "PDF yap", (b) => makePdf(content.textContent, b, bubble)),
+    iconBtn("pdf", "PDF'e dönüştür", () => openPdfDialog(content.textContent, bubble)),
   );
   actions.appendChild(
     iconBtn("pin", "Panoya ekle", (b) => pinText(content.textContent, b)),
@@ -135,9 +135,16 @@ function removeAfter(wrapper) {
 // --------------------------------------------------------------------------- //
 // Kopyala (tarayıcı panosu — 'Pano' özelliğiyle ilgisiz)
 // --------------------------------------------------------------------------- //
-async function copyText(text, btn) {
+function escapeHtml(s) {
+  return String(s).replace(
+    /[&<>"]/g,
+    (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]),
+  );
+}
+
+async function writeClipboard(text) {
   text = (text || "").trim();
-  if (!text) return;
+  if (!text) return false;
   try {
     if (navigator.clipboard?.writeText) {
       await navigator.clipboard.writeText(text);
@@ -150,16 +157,24 @@ async function copyText(text, btn) {
       document.execCommand("copy");
       ta.remove();
     }
-    const orig = btn.innerHTML;
-    btn.innerHTML = iconSvg("check");
-    btn.classList.add("ok");
-    setTimeout(() => {
-      btn.innerHTML = orig;
-      btn.classList.remove("ok");
-    }, 1200);
+    return true;
   } catch (_) {
-    btn.title = "Kopyalanamadı";
+    return false;
   }
+}
+
+async function copyText(text, btn) {
+  if (!(await writeClipboard(text))) {
+    btn.title = "Kopyalanamadı";
+    return;
+  }
+  const orig = btn.innerHTML;
+  btn.innerHTML = iconSvg("check");
+  btn.classList.add("ok");
+  setTimeout(() => {
+    btn.innerHTML = orig;
+    btn.classList.remove("ok");
+  }, 1200);
 }
 
 // --------------------------------------------------------------------------- //
@@ -254,6 +269,25 @@ async function retryMessage(contentEl) {
 // --------------------------------------------------------------------------- //
 // PDF ve pano işlemleri (buton yolu)
 // --------------------------------------------------------------------------- //
+
+// PDF'i indirir ve tarayıcının kaydetme işlemini doğrudan tetikler
+// (masaüstü: dosya iner; mobilde <a download> desteklenmiyorsa yeni sekmede açılır).
+async function triggerDownload(url, filename) {
+  const res = await apiFetch(url);
+  if (!res.ok) throw new Error("HTTP " + res.status);
+  const blob = await res.blob();
+  const objUrl = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = objUrl;
+  a.download = filename || "belge.pdf";
+  a.target = "_blank";
+  a.rel = "noopener";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(objUrl), 10000);
+}
+
 function attachPdfLink(container, url, filename) {
   let link = container.querySelector(":scope > .pdf-link");
   if (!link) {
@@ -267,27 +301,127 @@ function attachPdfLink(container, url, filename) {
   link.textContent = "📄 " + filename;
 }
 
-async function makePdf(text, btn, container) {
+// PDF'e Dönüştür formu — yazı tipi / hizalama / sayfa boyutu seçilir,
+// sonra "PDF İndir" (ayarlarla PDF) veya "Metni Kopyala" (seçilen yazı tipi +
+// hizalamayla biçimlendirilmiş; zengin metin olarak panoya, düz metin yedekli).
+const pdfDialog = document.getElementById("pdf-dialog");
+const pdfForm = document.getElementById("pdf-form");
+const pdfFont = document.getElementById("pdf-font");
+const pdfAlign = document.getElementById("pdf-align");
+const pdfSize = document.getElementById("pdf-size");
+const pdfStatus = document.getElementById("pdf-status");
+const pdfCancel = document.getElementById("pdf-cancel");
+const pdfCopyBtn = document.getElementById("pdf-copy");
+const pdfDownloadBtn = document.getElementById("pdf-download");
+
+let pdfCtx = { text: "", container: null };
+
+function openPdfDialog(text, container) {
   text = (text || "").trim();
   if (!text) return;
-  btn.disabled = true;
-  btn.classList.add("busy");
+  pdfCtx = { text, container: container || null };
+  pdfStatus.hidden = true;
+  pdfDownloadBtn.disabled = false;
+  pdfDialog.showModal();
+}
+
+pdfCancel.addEventListener("click", () => pdfDialog.close());
+
+// Formdaki font seçimi -> yapıştırılan uygulamada kullanılacak font yığını.
+// (Times New Roman / Georgia her yerde vardır; Tinos / Gelasio yedek.)
+// Tek tırnak: değer çift tırnaklı style="" içine gömülecek.
+const PDF_FONT_STACKS = {
+  times: "'Times New Roman', Tinos, Times, serif",
+  merriweather: "Merriweather, Georgia, 'Times New Roman', serif",
+  georgia: "Georgia, Gelasio, 'Times New Roman', serif",
+};
+
+function buildRichHtml(text, fontKey, alignKey) {
+  const family = PDF_FONT_STACKS[fontKey] || PDF_FONT_STACKS.merriweather;
+  const align = ["left", "center", "right", "justify"].includes(alignKey)
+    ? alignKey
+    : "justify";
+  const paras = text
+    .trim()
+    .split(/\n\s*\n/)
+    .map((p) => p.trim())
+    .filter(Boolean)
+    .map(
+      (p) =>
+        `<p style="margin:0 0 1em;text-align:${align};font-family:${family};">` +
+        `${escapeHtml(p).replace(/\n/g, "<br>")}</p>`,
+    )
+    .join("");
+  return (
+    `<meta charset="utf-8">` +
+    `<div style="font-family:${family};text-align:${align};">${paras}</div>`
+  );
+}
+
+// Öncelik: zengin metin (text/html + text/plain). Olmazsa düz metne düş.
+async function writeRichClipboard(html, plain) {
+  try {
+    if (navigator.clipboard?.write && window.ClipboardItem) {
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          "text/html": new Blob([html], { type: "text/html" }),
+          "text/plain": new Blob([plain], { type: "text/plain" }),
+        }),
+      ]);
+      return "rich";
+    }
+  } catch (_) {
+    /* zengin kopyalama desteklenmiyor — düz metne düş */
+  }
+  return (await writeClipboard(plain)) ? "plain" : "fail";
+}
+
+pdfCopyBtn.addEventListener("click", async () => {
+  const html = buildRichHtml(pdfCtx.text, pdfFont.value, pdfAlign.value);
+  const result = await writeRichClipboard(html, pdfCtx.text);
+  const msg = {
+    rich: "Biçimlendirilmiş metin panoya kopyalandı.",
+    plain: "Panoya kopyalandı (bu tarayıcı yalnız düz metni destekliyor).",
+    fail: "Kopyalanamadı.",
+  };
+  pdfStatus.textContent = msg[result];
+  pdfStatus.className = "fb-status " + (result === "fail" ? "err" : "ok");
+  pdfStatus.hidden = false;
+});
+
+pdfForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  pdfDownloadBtn.disabled = true;
+  pdfStatus.hidden = true;
   try {
     const res = await apiFetch("/api/pdf", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text }),
+      body: JSON.stringify({
+        text: pdfCtx.text,
+        font: pdfFont.value,
+        align: pdfAlign.value,
+        page_size: pdfSize.value,
+      }),
     });
     if (!res.ok) throw new Error("HTTP " + res.status);
     const { url, filename } = await res.json();
-    attachPdfLink(container, url, filename);
+    await triggerDownload(url, filename);
+    // Link balonda da kalsın: indirme açılmadıysa ya da tekrar gerekirse.
+    if (pdfCtx.container) attachPdfLink(pdfCtx.container, url, filename);
+    pdfStatus.innerHTML =
+      `PDF indirildi. Başlamadıysa: ` +
+      `<a href="${url}" target="_blank" rel="noopener">${escapeHtml(filename)}</a>`;
+    pdfStatus.className = "fb-status ok";
+    pdfStatus.hidden = false;
   } catch (_) {
-    btn.title = "PDF oluşturulamadı, tekrar dene";
+    pdfStatus.textContent = "PDF oluşturulamadı, tekrar dene.";
+    pdfStatus.className = "fb-status err";
+    pdfStatus.hidden = false;
   } finally {
-    btn.disabled = false;
-    btn.classList.remove("busy");
+    pdfDownloadBtn.disabled = false;
   }
-}
+});
 
 async function pinText(text, btn) {
   text = (text || "").trim();
@@ -417,7 +551,9 @@ async function loadPins(highlightId = null) {
 
     const row = document.createElement("div");
     row.className = "pin-actions";
-    row.appendChild(iconBtn("pdf", "PDF yap", (b) => makePdf(p.content, b, li)));
+    row.appendChild(
+      iconBtn("pdf", "PDF'e dönüştür", () => openPdfDialog(p.content, li)),
+    );
     const del = document.createElement("button");
     del.type = "button";
     del.className = "act";

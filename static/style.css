@@ -426,10 +426,30 @@ body:not([data-auth="1"]) #logout-btn { display: none; }
 
 .dialog-actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
   margin-top: 2px;
 }
+
+#pdf-form .dialog-actions .btn-ghost,
+#pdf-form .dialog-actions .btn-primary {
+  flex: 1 1 auto;
+  min-width: 120px;
+  text-align: center;
+}
+
+@media (max-width: 420px) {
+  #pdf-form .dialog-actions {
+    flex-direction: column-reverse;
+  }
+  #pdf-form .dialog-actions .btn-ghost,
+  #pdf-form .dialog-actions .btn-primary {
+    width: 100%;
+  }
+}
+
+#pdf-status a { color: var(--accent); }
 
 .btn-ghost,
 .btn-primary {

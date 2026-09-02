@@ -119,6 +119,43 @@
     </form>
   </dialog>
 
+  <dialog id="pdf-dialog" class="dialog">
+    <form id="pdf-form">
+      <h2>PDF'e Dönüştür</h2>
+      <label class="field">
+        <span>Yazı tipi</span>
+        <select id="pdf-font">
+          <option value="times">Times New Roman</option>
+          <option value="merriweather" selected>Merriweather</option>
+          <option value="georgia">Georgia</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>Metin hizalama</span>
+        <select id="pdf-align">
+          <option value="left">Sola yaslı</option>
+          <option value="center">Ortalı</option>
+          <option value="right">Sağa yaslı</option>
+          <option value="justify" selected>İki yana yaslı</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>Sayfa boyutu</span>
+        <select id="pdf-size">
+          <option value="a4">A4</option>
+          <option value="a5" selected>A5</option>
+          <option value="letter">Letter</option>
+        </select>
+      </label>
+      <p id="pdf-status" class="fb-status" hidden></p>
+      <div class="dialog-actions">
+        <button type="button" id="pdf-cancel" class="btn-ghost">Kapat</button>
+        <button type="button" id="pdf-copy" class="btn-ghost">Metni Kopyala</button>
+        <button type="submit" id="pdf-download" class="btn-primary">PDF İndir</button>
+      </div>
+    </form>
+  </dialog>
+
   <script src="/static/app.js"></script>
 </body>
 </html>

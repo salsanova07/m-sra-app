@@ -53,11 +53,11 @@ Tarayıcıda: http://localhost:8000
 | `app/claude_client.py` | Claude API bağlantısı, sistem promptu, `create_pdf` aracı, streaming |
 | `app/db.py` | Async SQLAlchemy motoru, oturum, tablo oluşturma |
 | `app/models.py` | `Conversation`, `Message`, `Feedback`, `Pin`, `PdfFile`, `LoginSession` |
-| `app/pdf.py` | Kitap tarzı PDF üretimi (A5, iki yana yaslı, Merriweather) + geçici saklama |
+| `app/pdf.py` | Kitap tarzı PDF üretimi (yazı tipi / hizalama / sayfa boyutu seçilir) + geçici saklama |
 | `app/notify.py` | Resend API ile geri bildirim e-posta bildirimi |
 | `app/auth.py` | Kullanıcı adı + şifre girişi: oturum / bağımlılıklar |
 | `app/config.py` | `.env` / ortam değişkeni ayarları |
-| `assets/fonts/` | Merriweather statik TTF'leri (PDF için, repoda) |
+| `assets/fonts/` | PDF fontları — Merriweather, Tinos (Times eşi), Gelasio (Georgia eşi) statik TTF'leri, repoda |
 | `templates/index.html` `login.html` | Chat arayüzü + giriş sayfası (static dışında — giriş yapmadan erişilemez) |
 | `static/style.css` `app.js` | Arayüz stilleri + betiği |
 | `static/manifest.webmanifest` `service-worker.js` | PWA |
@@ -75,7 +75,7 @@ Tarayıcıda: http://localhost:8000
 | `POST` | `/api/chat` | `{conversation_id, content}` → yanıtı SSE ile akıtır, iki tarafı da DB'ye yazar |
 | `POST` | `/api/feedback` | `{kind: "suggestion"\|"bug", message}` → DB'ye yazar, e-posta bildirir |
 | `GET` `POST` `DELETE` | `/api/pins[/{id}]` | Panoya sabitlenen metinler: listele / ekle / kaldır |
-| `POST` | `/api/pdf` | `{text, title?}` → metni PDF'e çevirir, `{url, filename}` döner |
+| `POST` | `/api/pdf` | `{text, title?, font?, align?, page_size?}` → metni PDF'e çevirir, `{url, filename}` döner |
 | `GET` | `/pdf/{token}` | Üretilen PDF'i indirir (24 saat geçerli) |
 | `GET` | `/admin` | Şifre korumalı (HTTP Basic) geri bildirim listesi, tarih sırası |
 | `GET` | `/login` | Kullanıcı adı + şifre giriş formu (auth kapalıysa `/`'a yönlendirir) |
@@ -116,29 +116,47 @@ Her mesajın altında (farenle üstüne gelince; mobilde hep görünür) sade ç
 - **Düzenle** (yalnız kullanıcı mesajı) — mesajı düzenleyip tekrar gönderirsin; o mesajdan
   sonraki geçmiş silinir ve yeni cevap üretilir.
 - **Yeniden oluştur** (yalnız Mısra'nın cevabı) — aynı soruya yeni bir cevap ürettirir.
-- **PDF yap** ve **Panoya ekle** (aşağıya bakın).
+- **PDF'e dönüştür** ve **Panoya ekle** (aşağıya bakın).
 
 ## Pano
 
 Sol panelde **Konuşmalar / Pano** sekmesi var. Bir mesajın altındaki 📌 ile o metni
 panoya eklersin — arayüz otomatik olarak Pano sekmesine geçer ve yeni öğe kısa bir
 vurgu (highlight) ile belirir. Pano öğeleri konuşmalardan bağımsız durur; her birinin
-yanında 📄 (PDF yap) ve × (kaldır) vardır.
+yanında 📄 (PDF'e dönüştür) ve × (kaldır) vardır.
 
 ## PDF'e dönüştürme
 
-İki yol, aynı mantık — kitap tarzı (A5, iki yana yaslı, Merriweather):
+İki yol:
 
-1. **Buton:** her mesajın ve her pano öğesinin altındaki 📄 → metni PDF yapar,
-   yanında indirme linki belirir.
+1. **Buton + form:** her mesajın ve her pano öğesinin altındaki 📄 → **PDF'e Dönüştür**
+   formunu açar. Seçenekler:
+   - **Yazı tipi:** Times New Roman · Merriweather · Georgia
+   - **Metin hizalama:** Sola / Ortalı / Sağa / İki yana yaslı (varsayılan: iki yana yaslı)
+   - **Sayfa boyutu:** A4 · A5 · Letter
+
+   Formun altında iki buton:
+   - **PDF İndir** — seçilen ayarlarla PDF üretir ve tarayıcının indirmesini
+     doğrudan tetikler (dosya blob olarak çekilip `<a download>` ile kaydedilir;
+     `download` desteklenmeyen mobil tarayıcıda yeni sekmede açılır). Yedek link
+     durum satırında kalır.
+   - **Metni Kopyala** — seçilen **yazı tipi + hizalamayla biçimlendirilmiş** metni
+     panoya kopyalar. Clipboard API ile zengin metin (`text/html`) yazılır; Word,
+     Google Docs, LibreOffice Writer gibi uygulamalara yapıştırınca font ve hizalama
+     korunur. Düz metin alıcılar için `text/plain` yedeği de eklenir; Clipboard API
+     yoksa düz metne düşer. (Sayfa boyutu yalnız PDF'i etkiler, kopyalamayı değil.)
 2. **Doğal dil:** sohbette "bunu PDF yap", "PDF olarak çıkar", "şunu PDF'e dönüştür"
-   yazınca Claude `create_pdf` aracını çağırır. Hangi metin olduğunu bağlamdan çıkarır
-   (son mesaj, önceki bir mesaj ya da `pin_id` ile panodaki bir öğe); belirsizse önce
-   kısa bir soru sorar. Link asistanın yanıtının sonuna eklenir ve mesajla kaydedilir.
+   yazınca Claude `create_pdf` aracını çağırır (varsayılan kitap düzeni: A5, iki yana
+   yaslı, Merriweather). Hangi metin olduğunu bağlamdan çıkarır (son mesaj, önceki bir
+   mesaj ya da `pin_id` ile panodaki bir öğe); belirsizse önce kısa bir soru sorar.
+   Link asistanın yanıtının sonuna eklenir ve mesajla kaydedilir.
+
+Times New Roman ve Georgia tescilli olduğundan, yerlerine metrik uyumlu ve Türkçe
+karakter destekli açık fontlar kullanılır: **Tinos** (Times eşi) ve **Gelasio**
+(Georgia eşi). Statik TTF'ler `assets/fonts/` içinde repoda gelir (OFL).
 
 PDF'ler `pdfs/` altında **24 saat** tutulur, sonra bir sonraki üretimde temizlenir.
-`GET /pdf/{token}` girişe bağlıdır. Merriweather statik TTF'leri `assets/fonts/`
-içinde repoda gelir (OFL).
+`GET /pdf/{token}` girişe bağlıdır.
 
 ## Geri bildirim
 

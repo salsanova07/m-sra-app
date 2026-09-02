@@ -427,13 +427,23 @@ async def delete_pin(
 class PdfRequest(BaseModel):
     text: str = Field(min_length=1, max_length=200_000)
     title: str | None = Field(default=None, max_length=200)
+    font: Literal["merriweather", "times", "georgia"] = "merriweather"
+    align: Literal["left", "center", "right", "justify"] = "justify"
+    page_size: Literal["a4", "a5", "letter"] = "a5"
 
 
 @app.post("/api/pdf", dependencies=[Depends(require_user)])
 async def make_pdf_endpoint(
     body: PdfRequest, session: AsyncSession = Depends(get_session)
 ) -> dict:
-    token, filename = await save_pdf(session, body.text, body.title)
+    token, filename = await save_pdf(
+        session,
+        body.text,
+        body.title,
+        font=body.font,
+        align=body.align,
+        page_size=body.page_size,
+    )
     return {"url": f"/pdf/{token}", "filename": filename}
 
 
