@@ -24,7 +24,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 FONT_DIR = BASE_DIR / "assets" / "fonts"
 PDF_DIR = BASE_DIR / "pdfs"
 PDF_TTL = timedelta(hours=24)
-MAX_TEXT = 200_000
+MAX_TEXT = 1_000_000  # "Kitabı Oluştur" bütün konuşmayı birleştirebilir
 
 PDF_DIR.mkdir(exist_ok=True)
 

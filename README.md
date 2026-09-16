@@ -50,7 +50,7 @@ Tarayıcıda: http://localhost:8000
 | Dosya | Görev |
 |---|---|
 | `app/main.py` | FastAPI uygulaması, rotalar, SSE chat endpoint'i |
-| `app/claude_client.py` | Claude API bağlantısı, sistem promptu, `create_pdf` aracı, streaming |
+| `app/claude_client.py` | Claude API bağlantısı, sistem promptu, `create_pdf` aracı, streaming, prompt caching |
 | `app/db.py` | Async SQLAlchemy motoru, oturum, tablo oluşturma |
 | `app/models.py` | `Conversation`, `Message`, `Feedback`, `Pin`, `PdfFile`, `LoginSession` |
 | `app/pdf.py` | Kitap tarzı PDF üretimi (yazı tipi / hizalama / sayfa boyutu seçilir) + geçici saklama |
@@ -72,12 +72,14 @@ Tarayıcıda: http://localhost:8000
 | `POST` | `/api/conversations` | Yeni boş konuşma oluşturur |
 | `GET` | `/api/conversations/{id}/messages` | Bir konuşmanın mesaj geçmişi |
 | `DELETE` | `/api/conversations/{id}` | Konuşmayı ve mesajlarını siler |
+| `PATCH` | `/api/messages/{id}` | `{content}` → mesajı olduğu gibi günceller (yeniden üretmez, geçmişe dokunmaz) |
 | `POST` | `/api/chat` | `{conversation_id, content}` → yanıtı SSE ile akıtır, iki tarafı da DB'ye yazar |
 | `POST` | `/api/feedback` | `{kind: "suggestion"\|"bug", message}` → DB'ye yazar, e-posta bildirir |
 | `GET` `POST` `DELETE` | `/api/pins[/{id}]` | Panoya sabitlenen metinler: listele / ekle / kaldır |
 | `POST` | `/api/pdf` | `{text, title?, font?, align?, page_size?}` → metni PDF'e çevirir, `{url, filename}` döner |
 | `GET` | `/pdf/{token}` | Üretilen PDF'i indirir (24 saat geçerli) |
-| `GET` | `/admin` | Şifre korumalı (HTTP Basic) geri bildirim listesi, tarih sırası |
+| `GET` | `/admin` | Şifre korumalı (HTTP Basic) panel — konuşmalar + geri bildirim listesi |
+| `GET` | `/admin/conversations/{id}` | Şifre korumalı — bir konuşmanın tam metni, salt okunur |
 | `GET` | `/login` | Kullanıcı adı + şifre giriş formu (auth kapalıysa `/`'a yönlendirir) |
 | `POST` | `/api/login` | `{username, password}` → doğruysa 1 yıllık oturum çerezi; yanlışsa 401 |
 | `POST` | `/logout` | Oturumu ve çerezi siler |
@@ -114,8 +116,14 @@ Kullanıcı adı UTF-8 destekler (ör. `barış`).
 Her mesajın altında (farenle üstüne gelince; mobilde hep görünür) sade çizgi ikonlar:
 
 - **Kopyala** — düz metni tarayıcı panosuna kopyalar (bu, aşağıdaki "Pano" özelliğiyle ilgisizdir).
-- **Düzenle** (yalnız kullanıcı mesajı) — mesajı düzenleyip tekrar gönderirsin; o mesajdan
-  sonraki geçmiş silinir ve yeni cevap üretilir.
+- **Düzenle** (her iki tarafta, farklı davranır):
+  - Kullanıcı mesajında: mesajı düzenleyip tekrar gönderirsin; o mesajdan sonraki
+    geçmiş silinir ve yeni cevap üretilir (`PATCH` değil, `POST /api/chat` +
+    `truncate_from_id`).
+  - Mısra'nın mesajında: metni **olduğu gibi** değiştirirsin — yeniden üretmez,
+    geçmişe dokunmaz, sadece o mesajın kaydını günceller
+    (`PATCH /api/messages/{id}`). Mısra'nın kendi yazdığı bir cümleyi/kelimeyi
+    elle düzeltmek için.
 - **Yeniden oluştur** (yalnız Mısra'nın cevabı) — aynı soruya yeni bir cevap ürettirir.
 - **PDF'e dönüştür** ve **Panoya ekle** (aşağıya bakın).
 
@@ -126,12 +134,22 @@ panoya eklersin — arayüz otomatik olarak Pano sekmesine geçer ve yeni öğe 
 vurgu (highlight) ile belirir. Pano öğeleri konuşmalardan bağımsız durur; her birinin
 yanında 📄 (PDF'e dönüştür) ve × (kaldır) vardır.
 
+## Kitabı Oluştur
+
+Üst çubukta 📖 **Kitabı Oluştur** butonu, açık konuşmadaki **bütün mesajları sırasıyla**
+(kullanıcı + Mısra, konuşma sırasında oldukları gibi — hiçbiri atlanmaz, yeniden
+sıralanmaz) tek bir metinde birleştirip aynı **PDF'e Dönüştür** formunu açar; böylece
+konuşmanın bağlamı ve olay örgüsü bozulmadan tek bir kitap PDF'i çıkar. Konuşmanın
+başlığı PDF'in başlığı ve dosya adı olarak kullanılır. Akış sırasında (yanıt yazılırken)
+buton devre dışıdır ki yarım kalan bir yanıt kitaba girmesin.
+
 ## PDF'e dönüştürme
 
-İki yol:
+İki yol (▸ artı yukarıdaki **Kitabı Oluştur**, aynı formu bütün konuşma için kullanır):
 
 1. **Buton + form:** her mesajın ve her pano öğesinin altındaki 📄 → **PDF'e Dönüştür**
-   formunu açar. Seçenekler:
+   formunu açar. Form, hangi metnin dönüştürüleceğini üstte gösterir ("Kaynak: bu
+   mesaj" / "pano öğesi" / "bütün konuşma (N mesaj)"). Seçenekler:
    - **Yazı tipi:** Times New Roman · Merriweather · Georgia
    - **Metin hizalama:** Sola / Ortalı / Sağa / İki yana yaslı (varsayılan: iki yana yaslı)
    - **Sayfa boyutu:** A4 · A5 · Letter
@@ -159,15 +177,54 @@ karakter destekli açık fontlar kullanılır: **Tinos** (Times eşi) ve **Gelas
 PDF'ler `pdfs/` altında **24 saat** tutulur, sonra bir sonraki üretimde temizlenir.
 `GET /pdf/{token}` girişe bağlıdır.
 
+## Token maliyeti (prompt caching)
+
+Her sohbet turunda konuşmanın tüm geçmişi Claude'a yeniden gönderilir (bağlamı/olay
+örgüsünü bozmamak için — mesajlar asla kısaltılmaz, özetlenmez, yeniden sıralanmaz).
+Bu, uzun süren bir konuşmada (ör. bir kitap üzerinde haftalarca çalışmak) maliyeti
+artırabileceğinden, [app/claude_client.py](app/claude_client.py) Anthropic'in
+**prompt caching**'ini otomatik kullanır:
+
+- Sistem promptu ve konuşmanın önceki turlarda gönderilmiş kısmı `cache_control`
+  imiyle işaretlenir. Bir sonraki turda bu önek değişmeden geldiğinde sunucu onu
+  tam fiyatına değil, çok daha ucuz bir "cache read" olarak işler; yalnızca o turda
+  eklenen yeni mesaj(lar) tam fiyata girer.
+- Hiçbir mesaj içeriği, sırası ya da uzunluğu değişmez — bu yalnız isteğe eklenen
+  bir meta veri; kullanıcı tarafında görünmez, ayar gerektirmez.
+- Önbellek varsayılan olarak **5 dakika** canlıdır; bu süre içinde art arda gelen
+  turlar ondan yararlanır. Düzenle/yeniden oluştur ile geçmiş kısaltıldığında
+  önbellek o noktadan sonrasını basitçe yeniden yazar — veri kaybı ya da hata yok.
+
 ## Geri bildirim
 
-- Arayüzde sol panelin altındaki **Öneri / Hata Bildir** butonu kısa bir form açar
-  (tür + mesaj). Gönderim `feedback` tablosuna yazılır.
+- Üst çubukta, Mısra logosunun yanında **Öneri / Hata Bildir** butonu kısa bir form
+  açar (tür + mesaj). Gönderim `feedback` tablosuna yazılır.
 - `RESEND_API_KEY`, `NOTIFY_EMAIL` (ve `FEEDBACK_FROM_EMAIL`) doluysa her yeni
   geri bildirimde `NOTIFY_EMAIL` adresine kısa bir bildirim e-postası gider.
   E-posta gönderimi başarısız olsa bile geri bildirim yine kaydedilir.
 - `/admin` sayfası tüm geri bildirimleri en yeniden eskiye listeler. Giriş: HTTP
   Basic — kullanıcı adı fark etmez, şifre `ADMIN_PASSWORD`.
+
+## Admin paneli ve kullanım bildirimi
+
+Geliştiricinin (senin), ana uygulamaya kendi kullanıcı adı/şifresiyle girmeden
+uygulamayı izleyip geliştirebilmesi için:
+
+- **`GET /admin`** artık geri bildirimlerin yanında **tüm konuşmaların** listesini
+  de gösterir (başlık, mesaj sayısı, son güncelleme). Bir konuşmaya tıklayınca
+  **`GET /admin/conversations/{id}`** o konuşmanın tam metnini (kullanıcı + Mısra,
+  sırasıyla) salt okunur gösterir.
+- Bu iki uç da `/admin`'in kendi `ADMIN_PASSWORD` korumasını kullanır — ana
+  uygulamanın `USER_LOGIN`/`USER_PASSWORD` girişinden tamamen ayrıdır, ana giriş
+  hiç gerekmez.
+- **Kullanım bildirimi:** birisi sohbete yeni bir mesaj gönderdiğinde, `RESEND_API_KEY`
+  ve `NOTIFY_EMAIL` doluysa `NOTIFY_EMAIL` adresine "Mısra kullanılıyor" başlıklı,
+  konuşmanın adını + son mesajı + `/admin/conversations/{id}` linkini içeren bir
+  e-posta gider — ama **en fazla 20 dakikada bir** (her mesajda değil, spam olmasın).
+  E-posta best-effort'tur; gönderilemezse sohbet akışını etkilemez.
+- Giriş tek paylaşımlı kullanıcı adı/şifre olduğu için bu bildirim, geliştiricinin
+  kendi testleri sırasında da tetiklenir — sistemin "Barış" ile "geliştirici"yi
+  ayırt etmesinin bir yolu yok; ikisi de aynı girişi kullanıyor.
 
 ## Veri modeli
 
@@ -194,8 +251,8 @@ açılışta en son güncellenen konuşmayı yükler; panelden eski konuşmalara
 | `MAX_TOKENS` | `4096` | Yanıt başına maksimum token |
 | `USER_NAME` | `Barış` | Asistanın zaman zaman adıyla hitap ettiği kişi (sistem promptuna geçer) |
 | `ADMIN_PASSWORD` | — | `/admin` şifresi. Boşsa `/admin` 503 döner. |
-| `RESEND_API_KEY` | — | Resend API anahtarı. Boşsa geri bildirim e-postası atlanır. |
-| `NOTIFY_EMAIL` | — | Geri bildirim bildirimlerinin gideceği adres. |
+| `RESEND_API_KEY` | — | Resend API anahtarı. Boşsa geri bildirim/kullanım e-postaları atlanır. |
+| `NOTIFY_EMAIL` | — | Geri bildirim ve kullanım bildirimlerinin gideceği adres. |
 | `FEEDBACK_FROM_EMAIL` | `onboarding@resend.dev` | Geri bildirim e-postasının gönderen adresi. |
 | `USER_LOGIN` | — | Giriş kullanıcı adı. `USER_PASSWORD` ile birlikte boşsa giriş kapalı. |
 | `USER_PASSWORD` | — | Giriş şifresi. |

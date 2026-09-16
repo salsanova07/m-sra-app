@@ -3,7 +3,7 @@
 // - Sayfa gezinmeleri: network-first (giriş/oturum durumuna göre değişir)
 // - /api/*, /pdf/*, /login, /logout : hiç dokunma, doğrudan ağ
 
-const CACHE = "misra-v12";
+const CACHE = "misra-v15";
 const ASSETS = [
   "/static/style.css",
   "/static/app.js",

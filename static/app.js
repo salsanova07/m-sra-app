@@ -10,15 +10,18 @@ const tabPin = document.getElementById("tab-pin");
 const sidebar = document.getElementById("sidebar");
 const overlay = document.getElementById("overlay");
 const menuBtn = document.getElementById("menu-btn");
+const bookBtn = document.getElementById("book-btn");
 
 const GREETING = "Merhaba. Ben Mısra. Ne üzerinde çalışıyorsun?";
 
 let currentId = null; // açık konuşmanın id'si
+let currentTitle = null; // açık konuşmanın başlığı (kitap PDF'inin adı için)
 let sending = false;
 
 function setBusy(b) {
   sending = b;
   input.disabled = sendBtn.disabled = b;
+  bookBtn.disabled = b;
 }
 
 // Oturum düşerse (401) giriş sayfasına dön.
@@ -41,6 +44,7 @@ const ICONS = {
   retry: '<path d="M12.7 4.6a5.2 5.2 0 1 0 1.1 3.4"/><path d="M13.6 2.3v3.1h-3.1"/>',
   pdf: '<path d="M4 2h5l3.4 3.4V14a.9.9 0 0 1-.9.9H4a.9.9 0 0 1-.9-.9V2.9A.9.9 0 0 1 4 2z"/><path d="M9 2.2v3.6h3.4"/>',
   pin: '<path d="M6 2.6h4M7.3 2.6v3l-1.7 1.7v1h4.8v-1L8.7 5.6v-3"/><path d="M8 8.3v5.1"/>',
+  book: '<path d="M8 3.7C6.7 2.8 4.9 2.5 3 2.8v9.6c1.9-.3 3.7 0 5 .9 1.3-.9 3.1-1.2 5-.9V2.8c-1.9-.3-3.7 0-5 .9z"/><path d="M8 3.7v9.6"/>',
 };
 
 function iconSvg(name) {
@@ -94,9 +98,7 @@ function addBubble(role, text = "", msgId = null) {
   actions.appendChild(
     iconBtn("copy", "Kopyala", (b) => copyText(content.textContent, b)),
   );
-  if (role === "user") {
-    actions.appendChild(iconBtn("edit", "Düzenle", () => startEdit(content)));
-  }
+  actions.appendChild(iconBtn("edit", "Düzenle", () => startEdit(content)));
   if (role === "assistant") {
     actions.appendChild(iconBtn("retry", "Yeniden oluştur", () => retryMessage(content)));
   }
@@ -178,13 +180,16 @@ async function copyText(text, btn) {
 }
 
 // --------------------------------------------------------------------------- //
-// Düzenle (kullanıcı mesajı) — sonrası silinir, yeni cevap üretilir
+// Düzenle — kullanıcı mesajında: sonrası silinir, yeni cevap üretilir.
+// Mısra'nın mesajında: metin olduğu gibi değişir, yeniden üretmez, geçmişe
+// dokunmaz (Barış'ın "yazdığın yazıyı aynı yerden değiştirmek" isteği).
 // --------------------------------------------------------------------------- //
 function startEdit(contentEl) {
   if (sending) return;
   const wrapper = contentEl.closest(".msg");
   const bubble = contentEl.closest(".bubble");
   const actions = bubble.querySelector(".bubble-actions");
+  const isUser = wrapper.classList.contains("user");
   const msgId = Number(wrapper.dataset.messageId);
   if (!msgId) return; // henüz kaydedilmemiş mesaj
   const original = contentEl.textContent;
@@ -229,21 +234,44 @@ function startEdit(contentEl) {
     if (!newText) return;
     if (newText === original) return close();
     send.disabled = cancel.disabled = true;
-    setBusy(true);
-    renderText(contentEl, newText);
-    close();
-    removeAfter(wrapper);
-    const reply = addBubble("assistant");
-    const ids = await streamChat({
-      content: newText,
-      truncateFromId: msgId,
-      reply,
-    });
-    if (ids.user_message_id) wrapper.dataset.messageId = ids.user_message_id;
-    if (ids.assistant_message_id)
-      reply.closest(".msg").dataset.messageId = ids.assistant_message_id;
-    setBusy(false);
-    input.focus();
+
+    if (isUser) {
+      // Kullanıcı mesajı: bu mesajdan sonrası silinir, yeni içerikle
+      // yeniden cevap üretilir.
+      setBusy(true);
+      renderText(contentEl, newText);
+      close();
+      removeAfter(wrapper);
+      const reply = addBubble("assistant");
+      const ids = await streamChat({
+        content: newText,
+        truncateFromId: msgId,
+        reply,
+      });
+      if (ids.title) currentTitle = ids.title;
+      if (ids.user_message_id) wrapper.dataset.messageId = ids.user_message_id;
+      if (ids.assistant_message_id)
+        reply.closest(".msg").dataset.messageId = ids.assistant_message_id;
+      setBusy(false);
+      input.focus();
+      return;
+    }
+
+    // Mısra'nın mesajı: metni olduğu gibi kaydet, ne yeniden üret ne de
+    // geçmişe dokun.
+    try {
+      const res = await apiFetch(`/api/messages/${msgId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: newText }),
+      });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      renderText(contentEl, newText);
+      close();
+    } catch (_) {
+      send.title = "Kaydedilemedi, tekrar dene";
+      send.disabled = cancel.disabled = false;
+    }
   });
 }
 
@@ -313,17 +341,33 @@ const pdfStatus = document.getElementById("pdf-status");
 const pdfCancel = document.getElementById("pdf-cancel");
 const pdfCopyBtn = document.getElementById("pdf-copy");
 const pdfDownloadBtn = document.getElementById("pdf-download");
+const pdfScope = document.getElementById("pdf-scope");
 
-let pdfCtx = { text: "", container: null };
+let pdfCtx = { text: "", container: null, title: null };
 
-function openPdfDialog(text, container) {
+function openPdfDialog(text, container, opts = {}) {
   text = (text || "").trim();
   if (!text) return;
-  pdfCtx = { text, container: container || null };
+  pdfCtx = { text, container: container || null, title: opts.title || null };
+  pdfScope.textContent = opts.scope || "Kaynak: bu mesaj";
   pdfStatus.hidden = true;
   pdfDownloadBtn.disabled = false;
   pdfDialog.showModal();
 }
+
+// "Kitabı Oluştur" — açık konuşmadaki bütün mesajları, sırasını bozmadan
+// (bağlam ve olay örgüsü korunur) tek bir metinde birleştirip aynı forma verir.
+bookBtn.addEventListener("click", () => {
+  const parts = [...chat.querySelectorAll(".msg .content")]
+    .map((el) => el.textContent.trim())
+    .filter(Boolean);
+  if (!parts.length) return;
+  const full = parts.join("\n\n");
+  openPdfDialog(full, null, {
+    title: currentTitle || "Kitap",
+    scope: `Kaynak: bütün konuşma (${parts.length} mesaj)`,
+  });
+});
 
 pdfCancel.addEventListener("click", () => pdfDialog.close());
 
@@ -399,6 +443,7 @@ pdfForm.addEventListener("submit", async (e) => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         text: pdfCtx.text,
+        title: pdfCtx.title || undefined,
         font: pdfFont.value,
         align: pdfAlign.value,
         page_size: pdfSize.value,
@@ -497,6 +542,7 @@ async function openConversation(id) {
   if (!res.ok) return;
   const data = await res.json();
   currentId = data.id;
+  currentTitle = data.title || null;
   renderMessages(data.messages);
   for (const li of convList.children) {
     li.classList.toggle("active", Number(li.dataset.id) === currentId);
@@ -509,6 +555,7 @@ async function newConversation() {
   const res = await apiFetch("/api/conversations", { method: "POST" });
   const c = await res.json();
   currentId = c.id;
+  currentTitle = c.title || null;
   await loadConversations();
   renderMessages([]);
   closeSidebar();
@@ -552,7 +599,9 @@ async function loadPins(highlightId = null) {
     const row = document.createElement("div");
     row.className = "pin-actions";
     row.appendChild(
-      iconBtn("pdf", "PDF'e dönüştür", () => openPdfDialog(p.content, li)),
+      iconBtn("pdf", "PDF'e dönüştür", () =>
+        openPdfDialog(p.content, li, { scope: "Kaynak: pano öğesi" }),
+      ),
     );
     const del = document.createElement("button");
     del.type = "button";
@@ -673,6 +722,7 @@ form.addEventListener("submit", async (e) => {
   const userC = addBubble("user", text);
   const reply = addBubble("assistant");
   const ids = await streamChat({ content: text, reply });
+  if (ids.title) currentTitle = ids.title;
   if (ids.user_message_id)
     userC.closest(".msg").dataset.messageId = ids.user_message_id;
   if (ids.assistant_message_id)

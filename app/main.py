@@ -3,12 +3,12 @@ import json
 import logging
 import secrets
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import AsyncIterator, Literal
 
 import anthropic
-from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, status
 from fastapi.responses import (
     FileResponse,
     HTMLResponse,
@@ -19,7 +19,7 @@ from fastapi.responses import (
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import auth
@@ -28,7 +28,7 @@ from .claude_client import stream_reply
 from .config import get_settings
 from .db import SessionMaker, engine, get_session, init_db
 from .models import Conversation, Feedback, Message, PdfFile, Pin
-from .notify import send_feedback_email
+from .notify import send_activity_email, send_feedback_email
 from .pdf import pdf_path, save_pdf
 
 log = logging.getLogger("misra")
@@ -215,6 +215,27 @@ async def delete_conversation(
         await session.commit()
 
 
+class MessageUpdateRequest(BaseModel):
+    content: str = Field(min_length=1, max_length=20000)
+
+
+@app.patch("/api/messages/{message_id}", dependencies=[Depends(require_user)])
+async def update_message(
+    message_id: int, body: MessageUpdateRequest, session: AsyncSession = Depends(get_session)
+) -> dict:
+    """Bir mesajın metnini olduğu gibi değiştirir — yeniden üretmez, geçmişe
+    dokunmaz. Kullanıcı mesajı için "Düzenle" akışı ayrıdır (yeni cevap
+    üretir); bu uç, Mısra'nın kendi yazdığı bir yanıtı elle düzeltmek için
+    kullanılır (istenen kelime/satırı doğrudan değiştirmek gibi).
+    """
+    msg = await session.get(Message, message_id)
+    if msg is None:
+        raise HTTPException(status_code=404, detail="Mesaj bulunamadı")
+    msg.content = body.content
+    await session.commit()
+    return {"id": msg.id, "content": msg.content}
+
+
 # --------------------------------------------------------------------------- #
 # Sohbet (SSE streaming)
 # --------------------------------------------------------------------------- #
@@ -225,8 +246,39 @@ class ChatRequest(BaseModel):
     truncate_from_id: int | None = None
 
 
+_ACTIVITY_NOTIFY_COOLDOWN = timedelta(minutes=20)
+_last_activity_notified_at: datetime | None = None
+
+
+async def _notify_activity_safe(title: str, content: str, conv_id: int) -> None:
+    try:
+        await send_activity_email(title, content, conv_id)
+    except Exception:
+        log.warning("Kullanım bildirimi e-postası gönderilemedi", exc_info=True)
+
+
+def _queue_activity_notice(
+    background_tasks: BackgroundTasks, title: str, content: str, conv_id: int
+) -> None:
+    """Uygulama kullanıldığında geliştiriciye e-posta gider — ama en fazla
+    20 dakikada bir (her mesajda değil), spam olmasın.
+
+    Not: giriş tek paylaşımlı kullanıcı adı/şifre olduğu için bu, geliştiricinin
+    kendi testleri sırasında da tetiklenir — ayırt etmenin bir yolu yok.
+    """
+    global _last_activity_notified_at
+    now = datetime.now(timezone.utc)
+    if (
+        _last_activity_notified_at is not None
+        and now - _last_activity_notified_at < _ACTIVITY_NOTIFY_COOLDOWN
+    ):
+        return
+    _last_activity_notified_at = now
+    background_tasks.add_task(_notify_activity_safe, title, content, conv_id)
+
+
 @app.post("/api/chat", dependencies=[Depends(require_user)])
-async def chat(req: ChatRequest) -> StreamingResponse:
+async def chat(req: ChatRequest, background_tasks: BackgroundTasks) -> StreamingResponse:
     """Sohbet yanıtını SSE ile akıtır.
 
     - Normal: `content` verilir → yeni kullanıcı mesajı eklenir.
@@ -274,6 +326,7 @@ async def chat(req: ChatRequest) -> StreamingResponse:
             await session.refresh(new_msg)
             user_msg_id = new_msg.id
             history.append({"role": "user", "content": req.content})
+            _queue_activity_notice(background_tasks, conv.title, req.content, conv.id)
         else:
             conv.updated_at = datetime.now(timezone.utc)
             await session.commit()
@@ -427,7 +480,7 @@ async def delete_pin(
 # PDF — buton yolu ile üretim + indirme
 # --------------------------------------------------------------------------- #
 class PdfRequest(BaseModel):
-    text: str = Field(min_length=1, max_length=200_000)
+    text: str = Field(min_length=1, max_length=1_000_000)
     title: str | None = Field(default=None, max_length=200)
     font: Literal["merriweather", "times", "georgia"] = "merriweather"
     align: Literal["left", "center", "right", "justify"] = "justify"
@@ -466,11 +519,18 @@ async def download_pdf(
 _basic = HTTPBasic()
 
 
+def _admin_eq(a: str, b: str) -> bool:
+    # secrets.compare_digest yalnız ASCII str kabul eder; Türkçe karakter
+    # içeren kullanıcı adı/şifre için UTF-8 baytlarını karşılaştır.
+    return secrets.compare_digest(a.encode("utf-8"), b.encode("utf-8"))
+
+
 def require_admin(creds: HTTPBasicCredentials = Depends(_basic)) -> None:
-    password = get_settings().admin_password
-    if not password:
+    s = get_settings()
+    if not s.admin_password:
         raise HTTPException(status_code=503, detail="ADMIN_PASSWORD ayarlanmadı")
-    if not secrets.compare_digest(creds.password, password):
+    username_ok = not s.admin_username or _admin_eq(creds.username, s.admin_username)
+    if not (username_ok and _admin_eq(creds.password, s.admin_password)):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Yetkisiz",
@@ -478,41 +538,92 @@ def require_admin(creds: HTTPBasicCredentials = Depends(_basic)) -> None:
         )
 
 
-def _render_admin(rows: list[Feedback]) -> str:
-    cards = []
-    for fb in rows:
+_ADMIN_STYLE = """
+  body { margin:0; padding:24px; background:#1b1a17; color:#ece7de;
+         font-family:"Merriweather",Georgia,serif; line-height:1.55; }
+  a { color:#c9a227; text-decoration:none; }
+  h1 { color:#c9a227; font-size:1.3rem; margin:26px 0 14px; }
+  h1:first-child { margin-top:0; }
+  h1 .count { color:#a49d8e; font-size:1rem; }
+  .back { display:inline-block; margin-bottom:8px; font-size:.9rem; }
+  .card { display:block; max-width:720px; margin:0 auto 12px; padding:12px 14px;
+          background:#262420; border:1px solid #3a372f; border-radius:12px; }
+  .card header { display:flex; gap:10px; align-items:center; margin-bottom:6px; }
+  .badge { font-size:.8rem; padding:2px 8px; border-radius:999px;
+           background:#38342c; color:#c9a227; }
+  .bug .badge { color:#e0908a; }
+  .user .badge { color:#8fa9d6; }
+  time { color:#a49d8e; font-size:.85rem; }
+  .card p { margin:0; white-space:pre-wrap; word-wrap:break-word; }
+  .conv-link { display:flex; justify-content:space-between; gap:12px; align-items:baseline; }
+  .conv-meta { color:#a49d8e; font-size:.85rem; white-space:nowrap; }
+  .empty { color:#a49d8e; text-align:center; }
+"""
+
+
+def _admin_page(title: str, body: str) -> str:
+    return f"""<!doctype html>
+<html lang="tr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mısra — {html.escape(title)}</title>
+<style>{_ADMIN_STYLE}</style></head>
+<body>
+{body}
+</body></html>"""
+
+
+def _render_admin(
+    feedback_rows: list[Feedback], conversations: list[tuple[Conversation, int]]
+) -> str:
+    conv_cards = []
+    for c, count in conversations:
+        when = c.updated_at.strftime("%d.%m.%Y %H:%M")
+        conv_cards.append(
+            f'<a class="card conv-link" href="/admin/conversations/{c.id}">'
+            f'<span>{html.escape(c.title or "Yeni konuşma")}</span>'
+            f'<span class="conv-meta">{count} mesaj · {when} UTC</span></a>'
+        )
+    conv_body = "\n".join(conv_cards) or '<p class="empty">Henüz konuşma yok.</p>'
+
+    fb_cards = []
+    for fb in feedback_rows:
         label = "Öneri" if fb.kind == "suggestion" else "Hata"
         when = fb.created_at.strftime("%d.%m.%Y %H:%M")
-        cards.append(
-            f'<article class="fb {fb.kind}">'
+        fb_cards.append(
+            f'<article class="card {fb.kind}">'
             f'<header><span class="badge">{label}</span>'
             f'<time>{when} UTC</time></header>'
             f"<p>{html.escape(fb.message)}</p></article>"
         )
-    body = "\n".join(cards) or '<p class="empty">Henüz geri bildirim yok.</p>'
-    return f"""<!doctype html>
-<html lang="tr"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Mısra — Geri Bildirimler</title>
-<style>
-  body {{ margin:0; padding:24px; background:#1b1a17; color:#ece7de;
-         font-family:"Merriweather",Georgia,serif; line-height:1.5; }}
-  h1 {{ color:#c9a227; font-size:1.4rem; margin:0 0 18px; }}
-  h1 .count {{ color:#a49d8e; font-size:1rem; }}
-  .fb {{ max-width:720px; margin:0 auto 12px; padding:12px 14px;
-         background:#262420; border:1px solid #3a372f; border-radius:12px; }}
-  .fb header {{ display:flex; gap:10px; align-items:center; margin-bottom:6px; }}
-  .badge {{ font-size:.8rem; padding:2px 8px; border-radius:999px;
-            background:#38342c; color:#c9a227; }}
-  .fb.bug .badge {{ color:#e0908a; }}
-  time {{ color:#a49d8e; font-size:.85rem; }}
-  .fb p {{ margin:0; white-space:pre-wrap; word-wrap:break-word; }}
-  .empty {{ color:#a49d8e; text-align:center; }}
-</style></head>
-<body>
-<h1>Geri Bildirimler <span class="count">({len(rows)})</span></h1>
-{body}
-</body></html>"""
+    fb_body = "\n".join(fb_cards) or '<p class="empty">Henüz geri bildirim yok.</p>'
+
+    return _admin_page(
+        "Panel",
+        f'<h1>Konuşmalar <span class="count">({len(conversations)})</span></h1>\n'
+        f"{conv_body}\n"
+        f'<h1>Geri Bildirimler <span class="count">({len(feedback_rows)})</span></h1>\n'
+        f"{fb_body}",
+    )
+
+
+def _render_admin_conversation(conv: Conversation, rows: list[Message]) -> str:
+    cards = []
+    for m in rows:
+        label = "Mısra" if m.role == "assistant" else "Kullanıcı"
+        when = m.created_at.strftime("%d.%m.%Y %H:%M")
+        cards.append(
+            f'<article class="card {m.role}">'
+            f'<header><span class="badge">{label}</span><time>{when} UTC</time></header>'
+            f"<p>{html.escape(m.content)}</p></article>"
+        )
+    body = "\n".join(cards) or '<p class="empty">Bu konuşmada mesaj yok.</p>'
+    title = conv.title or "Konuşma"
+    return _admin_page(
+        title,
+        f'<a class="back" href="/admin">← Panele dön</a>\n'
+        f"<h1>{html.escape(title)}</h1>\n"
+        f"{body}",
+    )
 
 
 @app.get("/admin", response_class=HTMLResponse)
@@ -520,9 +631,41 @@ async def admin(
     _: None = Depends(require_admin),
     session: AsyncSession = Depends(get_session),
 ) -> HTMLResponse:
-    rows = (
+    fb_rows = (
         await session.execute(
             select(Feedback).order_by(Feedback.created_at.desc(), Feedback.id.desc())
         )
     ).scalars().all()
-    return HTMLResponse(_render_admin(rows))
+    conv_rows = (
+        await session.execute(
+            select(Conversation).order_by(
+                Conversation.updated_at.desc(), Conversation.id.desc()
+            )
+        )
+    ).scalars().all()
+    conversations = []
+    for c in conv_rows:
+        count = await session.scalar(
+            select(func.count()).select_from(Message).where(Message.conversation_id == c.id)
+        )
+        conversations.append((c, count or 0))
+    return HTMLResponse(_render_admin(fb_rows, conversations))
+
+
+@app.get("/admin/conversations/{conv_id}", response_class=HTMLResponse)
+async def admin_conversation(
+    conv_id: int,
+    _: None = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+) -> HTMLResponse:
+    """Barış'ın bir konuşmasını olduğu gibi gösterir — geliştiricinin, ana
+    uygulamaya kendi girişiyle girmeden içeriği görebilmesi için."""
+    conv = await session.get(Conversation, conv_id)
+    if conv is None:
+        raise HTTPException(status_code=404, detail="Konuşma bulunamadı")
+    rows = (
+        await session.execute(
+            select(Message).where(Message.conversation_id == conv_id).order_by(Message.id)
+        )
+    ).scalars().all()
+    return HTMLResponse(_render_admin_conversation(conv, rows))

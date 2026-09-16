@@ -166,6 +166,32 @@ html, body {
 
 .subtitle { color: var(--muted); font-size: 0.95rem; font-style: italic; }
 
+.wordmark { margin-right: auto; }
+
+.topbar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  padding: 7px 12px;
+  border: 1px solid #4a463c;
+  border-radius: 9px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.topbar-btn:hover { border-color: var(--accent); color: var(--accent); }
+.topbar-btn:disabled { opacity: 0.5; cursor: default; }
+.topbar-btn svg { flex: none; }
+
+@media (max-width: 480px) {
+  .topbar-btn span { display: none; }
+  .topbar-btn { padding: 7px 9px; }
+}
+
 .chat {
   flex: 1;
   overflow-y: auto;
@@ -450,6 +476,12 @@ body:not([data-auth="1"]) #logout-btn { display: none; }
 }
 
 #pdf-status a { color: var(--accent); }
+
+.pdf-scope {
+  margin: -4px 0 4px;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
 
 .btn-ghost,
 .btn-primary {

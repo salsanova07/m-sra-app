@@ -23,7 +23,10 @@ class Settings(BaseSettings):
     # Asistanın hitap ettiği kişinin adı (sistem promptuna geçer)
     user_name: str = "Barış"
 
-    # /admin sayfası için şifre (boşsa /admin 503 döner)
+    # /admin sayfası için kullanıcı adı + şifre (şifre boşsa /admin 503 döner).
+    # Kullanıcı adı boş bırakılırsa eski davranış sürer: herhangi bir kullanıcı
+    # adı kabul edilir, yalnız şifre kontrol edilir.
+    admin_username: str = ""
     admin_password: str = ""
 
     # Geri bildirim e-posta bildirimi (Resend) — hepsi doluysa e-posta gönderilir

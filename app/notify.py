@@ -52,3 +52,24 @@ async def send_feedback_email(kind: str, message: str) -> None:
         f"[Mısra] Yeni geri bildirim: {label}",
         f"Tür: {label}\n\n{preview}\n\n— Tümü: /admin",
     )
+
+
+async def send_activity_email(conversation_title: str, message: str, conversation_id: int) -> None:
+    """Uygulama kullanıldığında NOTIFY_EMAIL adresine kısa bir bilgi e-postası atar.
+
+    Çağıran taraf bunu seyrekleştirir (her mesajda değil); burada ek bir sıklık
+    kontrolü yoktur. Resend / NOTIFY_EMAIL yapılandırılmamışsa sessizce atlanır.
+    Hata durumunda çağıran taraf try/except içine almalı.
+    """
+    s = get_settings()
+    if not (s.resend_api_key and s.notify_email):
+        logger.info("Resend/NOTIFY_EMAIL yok; kullanım bildirimi atlanıyor.")
+        return
+
+    preview = message if len(message) <= 500 else message[:500] + "…"
+    await _send_email(
+        s.notify_email,
+        "[Mısra] Uygulama kullanılıyor",
+        f"Konuşma: {conversation_title}\n\nMesaj: {preview}\n\n"
+        f"— Konuşmanın tamamı: /admin/conversations/{conversation_id}",
+    )

@@ -87,6 +87,34 @@ def _client() -> anthropic.AsyncAnthropic:
     return anthropic.AsyncAnthropic()
 
 
+def _cache_marked(messages: list[dict]) -> list[dict]:
+    """API isteği için son mesaja önbellek imi (cache_control) ekler.
+
+    Anthropic "prompt caching": aynı önek (bu noktaya kadarki mesajlar) bir
+    önceki turdan değişmeden geliyorsa sunucu onu tam fiyatına yeniden okumaz,
+    ucuz bir "cache read" olarak sayar. Konuşma sadece sona mesaj eklenerek
+    büyüdüğü için (düzenle/yeniden oluştur dışında hiçbir mesaj silinmez ya da
+    yeniden sıralanmaz — olay örgüsü bozulmaz), her turda önceki turun tamamı
+    bu şekilde önekte kalır ve önbellekten okunur; yalnızca o turda eklenen
+    son 1-2 mesaj tam fiyatına işlenir. Mesaj içeriği/sırası hiç değişmez —
+    yalnız isteğe eklenen bir meta veri; orijinal liste/sözlükler bu fonksiyon
+    tarafından değiştirilmez (yeni kopyalar döner).
+    """
+    if not messages:
+        return messages
+    out = [dict(m) for m in messages]
+    last = dict(out[-1])
+    content = last["content"]
+    blocks = [{"type": "text", "text": content}] if isinstance(content, str) else [
+        dict(b) for b in content
+    ]
+    if blocks:
+        blocks[-1] = {**blocks[-1], "cache_control": {"type": "ephemeral"}}
+        last["content"] = blocks
+        out[-1] = last
+    return out
+
+
 async def stream_reply(
     messages: list[dict], *, make_pdf: PdfMaker, system_extra: str = ""
 ) -> AsyncIterator[dict]:
@@ -97,7 +125,13 @@ async def stream_reply(
       {"type": "pdf", "token": "...", "filename": "..."}  — üretilen PDF
     """
     settings = get_settings()
-    system = _system_prompt() + (system_extra or "")
+    # Sistem promptu sabittir — önbellek imiyle işaretlenir (ör. Merriweather
+    # kadar sık değişmeyen bir metin, tekrar tekrar tam fiyatına gönderilmez).
+    # Pano bağlamı (system_extra) ayrı, imsiz bir blokta: pano değiştiğinde
+    # önbelleği bozmadan güncel kalır.
+    system = [{"type": "text", "text": _system_prompt(), "cache_control": {"type": "ephemeral"}}]
+    if system_extra:
+        system.append({"type": "text", "text": system_extra})
     convo = list(messages)
 
     for _ in range(_MAX_TOOL_ROUNDS):
@@ -106,7 +140,7 @@ async def stream_reply(
             max_tokens=settings.max_tokens,
             system=system,
             tools=[CREATE_PDF_TOOL],
-            messages=convo,
+            messages=_cache_marked(convo),
         ) as stream:
             async for event in stream:
                 if (
