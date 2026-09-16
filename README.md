@@ -97,6 +97,15 @@ girer (varsayılan davranış).
 3. Doğruysa **1 yıllık** `misra_session` çerezi kurulur — aynı cihaz/tarayıcıda bir
    daha giriş ekranı çıkmaz. Sol paneldeki **Çıkış yap** ile sonlandırılır.
 
+**Admin kimliğiyle giriş:** `ADMIN_USERNAME`/`ADMIN_PASSWORD` ile de bu **aynı**
+formdan giriş yapılabilir — ama sonucu farklıdır: sohbet ekranı değil, doğrudan
+[admin paneli](#admin-paneli-ve-kullanım-bildirimi) (konuşmalar + geri bildirimler)
+açılır. Bu, geliştiricinin telefona yüklü PWA'dan (adres çubuğu olmadan) `/admin`'e
+elle gitmeye çalışmadan, aynı giriş ekranından panele ulaşabilmesi için. Panelin
+üstündeki **Çıkış yap** ile çıkılır. `/admin`'e doğrudan URL ile (tarayıcının Basic
+Auth penceresiyle) gitmek de hâlâ ayrıca çalışır — ikisi birbirinden bağımsız,
+biri diğerini gerektirmez.
+
 Karşılaştırma sabit zamanlıdır (`secrets.compare_digest`). Oturumlar `login_sessions`
 tablosunda opak jeton olarak tutulur; **konuşma geçmişi (`conversations`/`messages`)
 bu sistemden tamamen bağımsızdır, hiçbir mesaj silinmez.**
@@ -207,24 +216,30 @@ artırabileceğinden, [app/claude_client.py](app/claude_client.py) Anthropic'in
 
 ## Admin paneli ve kullanım bildirimi
 
-Geliştiricinin (senin), ana uygulamaya kendi kullanıcı adı/şifresiyle girmeden
-uygulamayı izleyip geliştirebilmesi için:
+Geliştiricinin, Barış'ın konuşmalarını/geri bildirimlerini görebilmesi ve
+uygulamayı geliştirmesine yardımcı olması için:
 
-- **`GET /admin`** artık geri bildirimlerin yanında **tüm konuşmaların** listesini
-  de gösterir (başlık, mesaj sayısı, son güncelleme). Bir konuşmaya tıklayınca
+- **`GET /admin`** geri bildirimlerin yanında **tüm konuşmaların** listesini de
+  gösterir (başlık, mesaj sayısı, son güncelleme). Bir konuşmaya tıklayınca
   **`GET /admin/conversations/{id}`** o konuşmanın tam metnini (kullanıcı + Mısra,
-  sırasıyla) salt okunur gösterir.
-- Bu iki uç da `/admin`'in kendi `ADMIN_PASSWORD` korumasını kullanır — ana
-  uygulamanın `USER_LOGIN`/`USER_PASSWORD` girişinden tamamen ayrıdır, ana giriş
-  hiç gerekmez.
-- **Kullanım bildirimi:** birisi sohbete yeni bir mesaj gönderdiğinde, `RESEND_API_KEY`
+  sırasıyla) salt okunur gösterir. Üstte bir **Çıkış yap** butonu vardır.
+- **İki farklı giriş yolu, ikisi de yeterli:**
+  1. Ana sayfadaki (`/`) **aynı giriş formundan** `ADMIN_USERNAME`/`ADMIN_PASSWORD`
+     ile giriş — bu durumda `/` sohbet ekranını değil, doğrudan bu paneli gösterir.
+  2. `/admin` adresine doğrudan gidip tarayıcının **HTTP Basic** penceresine aynı
+     kullanıcı adı/şifreyi yazmak (eski davranış, hâlâ çalışır).
+  Her iki yol da tamamen ana uygulamanın `USER_LOGIN`/`USER_PASSWORD` girişinden
+  bağımsız — biri olmadan diğeri çalışır.
+- **Kimlik ayrımı:** Ana sayfa oturumunun kullanıcı adı `ADMIN_USERNAME` ile
+  eşleşiyorsa bu oturum "admin kimliği" sayılır (`auth.is_admin_session`) — sohbete
+  hiç erişemez, sadece paneli görür. Barış'ın oturumu ise tam tersi: paneli hiç
+  göremez, `/admin`'e istekte bulunursa 401 alır.
+- **Kullanım bildirimi:** Barış sohbete yeni bir mesaj gönderdiğinde, `RESEND_API_KEY`
   ve `NOTIFY_EMAIL` doluysa `NOTIFY_EMAIL` adresine "Mısra kullanılıyor" başlıklı,
   konuşmanın adını + son mesajı + `/admin/conversations/{id}` linkini içeren bir
   e-posta gider — ama **en fazla 20 dakikada bir** (her mesajda değil, spam olmasın).
-  E-posta best-effort'tur; gönderilemezse sohbet akışını etkilemez.
-- Giriş tek paylaşımlı kullanıcı adı/şifre olduğu için bu bildirim, geliştiricinin
-  kendi testleri sırasında da tetiklenir — sistemin "Barış" ile "geliştirici"yi
-  ayırt etmesinin bir yolu yok; ikisi de aynı girişi kullanıyor.
+  E-posta best-effort'tur; gönderilemezse sohbet akışını etkilemez. Admin kimliği
+  sohbete hiç erişemediği için bu bildirim yalnız Barış'ın kullanımında tetiklenir.
 
 ## Veri modeli
 

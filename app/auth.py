@@ -39,10 +39,25 @@ def _eq(a: str, b: str) -> bool:
 
 def check_credentials(username: str, password: str) -> bool:
     s = get_settings()
-    # sabit zamanlı karşılaştırma; ikisi de eşleşmeli
-    return _eq(username.strip(), s.user_login.strip()) and _eq(
-        password, s.user_password.strip()
-    )
+    username = username.strip()
+    # sabit zamanlı karşılaştırma; normal kullanıcı GİBİ, admin kimliği de bu
+    # aynı formdan girebilir (ADMIN_USERNAME/ADMIN_PASSWORD ile) — is_admin_session
+    # ile ayrımı yapılır.
+    if _eq(username, s.user_login.strip()) and _eq(password, s.user_password.strip()):
+        return True
+    if s.admin_username.strip() and _eq(username, s.admin_username.strip()) and _eq(
+        password, s.admin_password.strip()
+    ):
+        return True
+    return False
+
+
+def is_admin_session(username: str | None) -> bool:
+    """Bu ana sayfa oturumu admin kimliğiyle mi açıldı (ADMIN_USERNAME)?"""
+    s = get_settings()
+    if not username or not s.admin_username.strip():
+        return False
+    return _eq(username.strip(), s.admin_username.strip())
 
 
 # --------------------------------------------------------------------------- #

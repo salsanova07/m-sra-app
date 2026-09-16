@@ -65,10 +65,19 @@ def _conv_dict(c: Conversation) -> dict:
 # Statik / PWA
 # --------------------------------------------------------------------------- #
 @app.get("/", response_class=HTMLResponse)
-async def index(request: Request) -> HTMLResponse:
-    # Giriş zorunluysa ve oturum yoksa: giriş sayfasını göster.
-    if auth.auth_enabled() and await auth.optional_user(request) is None:
-        return HTMLResponse((TEMPLATES_DIR / "login.html").read_text(encoding="utf-8"))
+async def index(
+    request: Request, session: AsyncSession = Depends(get_session)
+) -> HTMLResponse:
+    if auth.auth_enabled():
+        username = await auth.optional_user(request)
+        # Giriş yoksa: giriş sayfasını göster.
+        if username is None:
+            return HTMLResponse((TEMPLATES_DIR / "login.html").read_text(encoding="utf-8"))
+        # Admin kimliğiyle (ADMIN_USERNAME) girildiyse: sohbet değil, doğrudan
+        # bildirim/geri bildirim/konuşma panelini göster — "kitap yazmayacağım,
+        # sadece görmek istiyorum" isteği.
+        if auth.is_admin_session(username):
+            return HTMLResponse(await _build_admin_dashboard(session))
 
     # %OG_BASE% yer tutucusunu isteğin mutlak adresiyle değiştir — böylece
     # og:image / og:url link önizlemelerinde (WhatsApp, Telegram) mutlak URL olur.
@@ -514,9 +523,11 @@ async def download_pdf(
 
 
 # --------------------------------------------------------------------------- #
-# /admin — şifre korumalı geri bildirim listesi (HTTP Basic Auth)
+# /admin — geri bildirim + konuşma paneli. İki girişten biri yeter:
+#   1) Ana sayfadan admin kimliğiyle (ADMIN_USERNAME) açılmış oturum çerezi
+#   2) Doğrudan /admin adresine gidildiğinde tarayıcının HTTP Basic penceresi
 # --------------------------------------------------------------------------- #
-_basic = HTTPBasic()
+_basic = HTTPBasic(auto_error=False)
 
 
 def _admin_eq(a: str, b: str) -> bool:
@@ -525,17 +536,27 @@ def _admin_eq(a: str, b: str) -> bool:
     return secrets.compare_digest(a.encode("utf-8"), b.encode("utf-8"))
 
 
-def require_admin(creds: HTTPBasicCredentials = Depends(_basic)) -> None:
+def _basic_ok(creds: HTTPBasicCredentials | None, s) -> bool:
+    if creds is None:
+        return False
+    username_ok = not s.admin_username or _admin_eq(creds.username, s.admin_username)
+    return username_ok and _admin_eq(creds.password, s.admin_password)
+
+
+async def require_admin(
+    request: Request, creds: HTTPBasicCredentials | None = Depends(_basic)
+) -> None:
     s = get_settings()
     if not s.admin_password:
         raise HTTPException(status_code=503, detail="ADMIN_PASSWORD ayarlanmadı")
-    username_ok = not s.admin_username or _admin_eq(creds.username, s.admin_username)
-    if not (username_ok and _admin_eq(creds.password, s.admin_password)):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Yetkisiz",
-            headers={"WWW-Authenticate": "Basic"},
-        )
+    session_user = await auth.optional_user(request)
+    if auth.is_admin_session(session_user) or _basic_ok(creds, s):
+        return
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Yetkisiz",
+        headers={"WWW-Authenticate": "Basic"},
+    )
 
 
 _ADMIN_STYLE = """
@@ -546,6 +567,11 @@ _ADMIN_STYLE = """
   h1:first-child { margin-top:0; }
   h1 .count { color:#a49d8e; font-size:1rem; }
   .back { display:inline-block; margin-bottom:8px; font-size:.9rem; }
+  .logout-form { max-width:720px; margin:0 auto 4px; text-align:right; }
+  .logout-form button { font:inherit; font-size:.85rem; padding:5px 12px;
+    border-radius:8px; border:1px solid #4a463c; background:none;
+    color:#a49d8e; cursor:pointer; }
+  .logout-form button:hover { color:#c9a227; border-color:#c9a227; }
   .card { display:block; max-width:720px; margin:0 auto 12px; padding:12px 14px;
           background:#262420; border:1px solid #3a372f; border-radius:12px; }
   .card header { display:flex; gap:10px; align-items:center; margin-bottom:6px; }
@@ -599,11 +625,35 @@ def _render_admin(
 
     return _admin_page(
         "Panel",
+        '<form method="post" action="/logout" class="logout-form">'
+        '<button type="submit">Çıkış yap</button></form>\n'
         f'<h1>Konuşmalar <span class="count">({len(conversations)})</span></h1>\n'
         f"{conv_body}\n"
         f'<h1>Geri Bildirimler <span class="count">({len(feedback_rows)})</span></h1>\n'
         f"{fb_body}",
     )
+
+
+async def _build_admin_dashboard(session: AsyncSession) -> str:
+    fb_rows = (
+        await session.execute(
+            select(Feedback).order_by(Feedback.created_at.desc(), Feedback.id.desc())
+        )
+    ).scalars().all()
+    conv_rows = (
+        await session.execute(
+            select(Conversation).order_by(
+                Conversation.updated_at.desc(), Conversation.id.desc()
+            )
+        )
+    ).scalars().all()
+    conversations = []
+    for c in conv_rows:
+        count = await session.scalar(
+            select(func.count()).select_from(Message).where(Message.conversation_id == c.id)
+        )
+        conversations.append((c, count or 0))
+    return _render_admin(fb_rows, conversations)
 
 
 def _render_admin_conversation(conv: Conversation, rows: list[Message]) -> str:
@@ -631,25 +681,7 @@ async def admin(
     _: None = Depends(require_admin),
     session: AsyncSession = Depends(get_session),
 ) -> HTMLResponse:
-    fb_rows = (
-        await session.execute(
-            select(Feedback).order_by(Feedback.created_at.desc(), Feedback.id.desc())
-        )
-    ).scalars().all()
-    conv_rows = (
-        await session.execute(
-            select(Conversation).order_by(
-                Conversation.updated_at.desc(), Conversation.id.desc()
-            )
-        )
-    ).scalars().all()
-    conversations = []
-    for c in conv_rows:
-        count = await session.scalar(
-            select(func.count()).select_from(Message).where(Message.conversation_id == c.id)
-        )
-        conversations.append((c, count or 0))
-    return HTMLResponse(_render_admin(fb_rows, conversations))
+    return HTMLResponse(await _build_admin_dashboard(session))
 
 
 @app.get("/admin/conversations/{conv_id}", response_class=HTMLResponse)
